@@ -132,10 +132,9 @@ def calculate_profit_factor_and_sharpe(historical_positions):
 
     return profit_factor, sharpe_ratio
 
-# 示例使用
-# if __name__ == "__main__":
-#     user_address = "0xYourAddressHere"
-#     historical = get_historical_positions(user_address)
-#     pf, sharpe = calculate_profit_factor_and_sharpe(historical)
-#     print(f"Profit Factor: {pf}")
-#     print(f"Sharpe Ratio: {sharpe}")
+if __name__ == "__main__":
+    user_address = "0x7717a7a245d9f950e586822b8c9b46863ed7bd7e"
+    historical = get_historical_positions(user_address)
+    pf, sharpe = calculate_profit_factor_and_sharpe(historical)
+    print(f"Profit Factor: {pf}")
+    print(f"Sharpe Ratio: {sharpe}")
