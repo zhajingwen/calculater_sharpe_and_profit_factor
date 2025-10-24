@@ -13,6 +13,10 @@ class HyperliquidAnalyzer:
         """发送 POST 请求到 Hyperliquid API"""
         headers = {'Content-Type': 'application/json'}
         response = requests.post(self.base_url, json=data, headers=headers)
+        if data['type'] == 'userSnapshot':
+            print(response.text)
+        print(data)
+        print(response.status_code)
         return response.json()
     
     def get_user_state(self):
@@ -123,7 +127,7 @@ class HyperliquidAnalyzer:
             return 0
         
         sharpe = mean_return / std_dev
-        return round(sharpe, 2)
+        return round(sharpe, 4)
     
     def get_account_value_history(self):
         """
@@ -131,7 +135,7 @@ class HyperliquidAnalyzer:
         注意：Hyperliquid 可能需要通过多个 API 调用来构建完整的历史数据
         """
         # 尝试获取快照数据
-        snapshot_data = self.get_snapshot_and_history()
+        # snapshot_data = self.get_snapshot_and_history()
         
         # 如果 API 不直接提供历史数据，我们需要从成交记录重建
         fills = self.get_user_fills()
@@ -148,6 +152,7 @@ class HyperliquidAnalyzer:
             daily_data = {}
             
             for fill in sorted_fills:
+                # print(fill)
                 timestamp = fill.get('time', 0)
                 date = datetime.fromtimestamp(timestamp / 1000).date()
                 
@@ -162,9 +167,11 @@ class HyperliquidAnalyzer:
                     }
                 else:
                     daily_data[date]['pnl'] = float(running_pnl)
+                # print(daily_data)
             
             # 获取当前账户价值
             user_state = self.get_user_state()
+            print(f'user_state:{user_state}')
             if user_state and 'marginSummary' in user_state:
                 current_value = Decimal(str(user_state['marginSummary'].get('accountValue', 0)))
                 

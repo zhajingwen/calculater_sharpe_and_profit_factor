@@ -1,109 +1,141 @@
 import requests
-import json
+import re
 import statistics
-import math
 
-# Hyperliquid API endpoint
-API_URL = "https://api.hyperliquid.xyz/info"
+def is_open(dir_):
+    return dir_ in ["Open Long", "Open Short"]
 
-def fetch_hyperliquid_data(payload):
+def is_close(dir_):
+    return dir_ in ["Close Long", "Close Short", "Short > Long", "Long > Short"]
+
+def get_side(dir_):
+    return "Long" if dir_ in ["Open Long", "Close Long", "Short > Long"] else "Short"
+
+def get_user_fills(user_address):
+    base_url = "https://api.hyperliquid.xyz/info"
+    fills = []
+    start_time = 0
+    while True:
+        body = {
+            "type": "userFillsByTime",
+            "user": user_address,
+            "startTime": start_time,
+            "aggregateByTime": True
+        }
+        response = requests.post(base_url, json=body)
+        response.raise_for_status()
+        data = response.json()
+        if not data:
+            break
+        fills.extend(data)
+        if len(data) < 2000:
+            break
+        # Assuming data is sorted ascending by time
+        max_time = max(d['time'] for d in data)
+        start_time = max_time + 1
+    return fills
+
+def get_historical_positions(user_address):
+    fills = get_user_fills(user_address)
+    # Filter out coins matching @\d+
+    fills = [f for f in fills if not re.match(r'^@\d+$', f['coin'])]
+    # Sort by time ascending
+    fills.sort(key=lambda f: f['time'])
+    # Group by coin
+    groups = {}
+    for f in fills:
+        coin = f['coin']
+        groups.setdefault(coin, []).append(f)
+    historical = []
+    for group in groups.values():
+        t = []
+        s = None
+        for a in group:
+            try:
+                sz = float(a['sz'])
+                px = float(a['px'])
+                fee = float(a.get('fee', 0.0))
+                start_position = float(a['startPosition'])
+                closed_pnl = float(a['closedPnl'])
+            except (KeyError, ValueError):
+                continue  # Skip invalid fills
+            i = abs(start_position)
+            n = px * i if sz > i else px * sz
+            dir_ = a['dir']
+            side = get_side(dir_)
+            if is_open(dir_):
+                if s:
+                    s['buyValue'] += px * sz
+                    s['buySize'] += sz
+                    s['totalFees'] += fee
+                else:
+                    s = {
+                        'coin': a['coin'],
+                        'side': side,
+                        'dir': side,
+                        'openTime': a['time'],
+                        'buyValue': px * sz,
+                        'buySize': sz,
+                        'totalFees': fee,
+                        'closedPnl': closed_pnl,
+                        'sellValue': 0.0,
+                        'sellSize': 0.0,
+                        'positionValue': n
+                    }
+            elif s and is_close(dir_) and side == s['side']:
+                s['sellValue'] += px * sz
+                s['sellSize'] += sz
+                s['totalFees'] += fee
+                s['closedPnl'] += closed_pnl
+                s['positionValue'] += n
+                if sz >= i:
+                    s['closeTime'] = a['time']
+                    pnl = s['closedPnl'] - s['totalFees']
+                    roi = (pnl * 100) / s['positionValue'] if s['positionValue'] != 0 else 0.0
+                    entry_price = s['buyValue'] / s['buySize'] if s['buySize'] != 0 else 0.0
+                    exit_price = s['sellValue'] / s['sellSize'] if s['sellSize'] != 0 else 0.0
+                    pos = s.copy()
+                    pos['pnl'] = pnl
+                    pos['roi'] = roi
+                    pos['entryPrice'] = entry_price
+                    pos['exitPrice'] = exit_price
+                    t.append(pos)
+                    s = None
+        historical.extend(t)
+    return historical
+
+def calculate_profit_factor_and_sharpe(historical_positions):
     """
-    Helper function to fetch data from Hyperliquid API.
+    计算 Profit Factor 和 Sharpe Ratio 基于历史位置数据。
+
+    :param historical_positions: 列表，每个元素是一个字典，包含 'pnl' (利润/损失) 和 'roi' (回报率，百分比形式)。
+    :return: 元组 (profit_factor, sharpe_ratio)
     """
-    headers = {"Content-Type": "application/json"}
-    response = requests.post(API_URL, headers=headers, data=json.dumps(payload))
-    if response.status_code == 200:
-        return response.json()
+    if not historical_positions:
+        return 0.0, 0.0
+
+    # 计算 Profit Factor
+    total_profit = sum(pos['pnl'] for pos in historical_positions if pos['pnl'] > 0)
+    total_loss = sum(pos['pnl'] for pos in historical_positions if pos['pnl'] < 0)
+    profit_factor = total_profit / abs(total_loss) if total_loss != 0 else 0.0  # 避免除以零
+
+    # 计算 Sharpe Ratio
+    returns = [pos['roi'] / 100 for pos in historical_positions]  # 将 ROI 转换为小数形式
+    if len(returns) < 2:
+        sharpe_ratio = 0.0
     else:
-        raise Exception(f"API request failed: {response.text}")
+        mean_return = statistics.mean(returns)
+        std_return = statistics.stdev(returns)
+        sharpe_ratio = mean_return / std_return if std_return != 0 else 0.0
+        # 注意: 这里未进行年化处理，因为 JS 代码中未明确指定时间-based 的年化因子。
+        # 如果需要年化，可以添加如 sharpe_ratio *= math.sqrt(252) 假设交易日。
 
-def calculate_profit_factor(address):
-    """
-    Calculate Profit Factor based on user fills and current state.
-    """
-    # Fetch user fills (closed trades)
-    fills_payload = {"type": "userFills", "user": address}
-    fills_data = fetch_hyperliquid_data(fills_payload)
-    fills = fills_data.get("fills", [])  # Adjust based on actual response structure
+    return profit_factor, sharpe_ratio
 
-    # Fetch current user state (open positions)
-    state_payload = {"type": "userState", "user": address}
-    state_data = fetch_hyperliquid_data(state_payload)
-    asset_positions = state_data.get("clearinghouseState", {}).get("assetPositions", [])  # Adjust path
-
-    gains = 0.0
-    losses = 0.0
-
-    # Process closed fills
-    for fill_group in fills:
-        for fill in fill_group.get("fills", []):
-            closed_pnl = float(fill.get("closedPnl", 0))
-            if closed_pnl > 0:
-                gains += closed_pnl
-            else:
-                losses += abs(closed_pnl)
-
-    # Process open positions (unrealized PNL)
-    for pos in asset_positions:
-        unrealized_pnl = float(pos.get("position", {}).get("unrealizedPnl", 0))
-        if unrealized_pnl > 0:
-            gains += unrealized_pnl
-        else:
-            losses += abs(unrealized_pnl)
-
-    if losses == 0:
-        return "1000+" if gains > 0 else 0
-    else:
-        return round(gains / losses, 2)
-
-def calculate_sharpe_ratio(address, period="perpAllTime"):
-    """
-    Calculate simplified Sharpe Ratio for the given period.
-    """
-    # Fetch portfolio data
-    portfolio_payload = {"type": "portfolio", "user": address}
-    portfolio_data = fetch_hyperliquid_data(portfolio_payload)
-
-    # Find the entry for the period
-    entry = next((e[1] for e in portfolio_data if e[0] == period), None)
-    if not entry:
-        return 0
-
-    account_values = [float(val[1]) for val in entry.get("accountValueHistory", [])]
-    pnls = [float(val[1]) for val in entry.get("pnlHistory", [])]
-
-    if len(account_values) == 0 or len(pnls) < 2:
-        return 0
-
-    # Average account value
-    avg_value = sum(account_values) / len(account_values)
-    if avg_value == 0:
-        return 0
-
-    # Daily returns
-    daily_returns = []
-    for i in range(1, len(pnls)):
-        daily_pnl = pnls[i] - pnls[i-1]
-        daily_return = (daily_pnl / avg_value) * 100
-        daily_returns.append(daily_return)
-
-    if len(daily_returns) < 2:
-        return 0
-
-    # Mean and standard deviation
-    mean = statistics.mean(daily_returns)
-    variance = sum((r - mean) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
-    std_dev = math.sqrt(variance)
-
-    if std_dev == 0:
-        return 0
-    else:
-        return round(mean / std_dev, 2)
-
-# Example usage
-if __name__ == "__main__":
-    address = "0x7717a7a245d9f950e586822b8c9b46863ed7bd7e"
-    profit_factor = calculate_profit_factor(address)
-    sharpe_ratio = calculate_sharpe_ratio(address)
-    print(f"Profit Factor: {profit_factor}")
-    print(f"Sharpe Ratio (All Time): {sharpe_ratio}")
+# 示例使用
+# if __name__ == "__main__":
+#     user_address = "0xYourAddressHere"
+#     historical = get_historical_positions(user_address)
+#     pf, sharpe = calculate_profit_factor_and_sharpe(historical)
+#     print(f"Profit Factor: {pf}")
+#     print(f"Sharpe Ratio: {sharpe}")
