@@ -85,24 +85,6 @@ class HyperliquidAPIClient:
         response = self._make_request("/info", payload)
         return response
     
-    def get_user_historical_pnl(self, user_address: str) -> List[Dict[str, Any]]:
-        """
-        获取用户历史PnL数据
-        
-        Args:
-            user_address: 用户地址
-            
-        Returns:
-            历史PnL数据
-        """
-        payload = {
-            "type": "historicalPnl",
-            "user": user_address
-        }
-        
-        response = self._make_request("/info", payload)
-        return response.get("pnlHistory", [])
-    
     def get_user_asset_positions(self, user_address: str) -> List[Dict[str, Any]]:
         """
         获取用户资产持仓
@@ -145,6 +127,8 @@ class HyperliquidAPIClient:
         }
         
         response = self._make_request("/info", payload)
+        if isinstance(response, list):
+            return response
         return response.get("orders", [])
     
     def get_user_twap_slice_fills(self, user_address: str) -> List[Dict[str, Any]]:
@@ -157,49 +141,19 @@ class HyperliquidAPIClient:
         Returns:
             TWAP切片成交记录
         """
-        payload = {
-            "type": "userTwapSliceFills",
-            "user": user_address
-        }
-        
-        response = self._make_request("/info", payload)
-        return response.get("fills", [])
-    
-    def get_user_funding_history(self, user_address: str) -> List[Dict[str, Any]]:
-        """
-        获取用户资金历史
-        
-        Args:
-            user_address: 用户地址
+        try:
+            payload = {
+                "type": "userTwapSliceFills",
+                "user": user_address
+            }
             
-        Returns:
-            资金历史数据
-        """
-        payload = {
-            "type": "fundingHistory",
-            "user": user_address
-        }
-        
-        response = self._make_request("/info", payload)
-        return response.get("fundingHistory", [])
-    
-    def get_user_ledger_updates(self, user_address: str) -> List[Dict[str, Any]]:
-        """
-        获取用户账本更新记录
-        
-        Args:
-            user_address: 用户地址
-            
-        Returns:
-            账本更新记录
-        """
-        payload = {
-            "type": "ledgerUpdates",
-            "user": user_address
-        }
-        
-        response = self._make_request("/info", payload)
-        return response.get("ledgerUpdates", [])
+            response = self._make_request("/info", payload)
+            if isinstance(response, list):
+                return response
+            return response.get("fills", [])
+        except Exception as e:
+            print(f"获取TWAP切片成交记录失败: {e}")
+            return []
     
     def get_user_portfolio_data(self, user_address: str) -> Dict[str, Any]:
         """
@@ -217,13 +171,22 @@ class HyperliquidAPIClient:
             # 获取所有相关数据
             fills = self.get_user_fills(user_address)
             user_state = self.get_user_state(user_address)
-            historical_pnl = self.get_user_historical_pnl(user_address)
             asset_positions = self.get_user_asset_positions(user_address)
             margin_summary = self.get_user_margin_summary(user_address)
             open_orders = self.get_user_open_orders(user_address)
             twap_fills = self.get_user_twap_slice_fills(user_address)
-            funding_history = self.get_user_funding_history(user_address)
-            ledger_updates = self.get_user_ledger_updates(user_address)
+            
+            # 数据验证完成
+            
+            # 确保所有数据都是列表或字典
+            if not isinstance(fills, list):
+                fills = []
+            if not isinstance(asset_positions, list):
+                asset_positions = []
+            if not isinstance(open_orders, list):
+                open_orders = []
+            if not isinstance(twap_fills, list):
+                twap_fills = []
             
             # 构建完整的投资组合数据
             portfolio_data = {
@@ -231,14 +194,21 @@ class HyperliquidAPIClient:
                 "timestamp": int(time.time() * 1000),
                 "fills": fills,
                 "userState": user_state,
-                "historicalPnl": historical_pnl,
                 "assetPositions": asset_positions,
                 "marginSummary": margin_summary,
                 "openOrders": open_orders,
                 "twapFills": twap_fills,
-                "fundingHistory": funding_history,
-                "ledgerUpdates": ledger_updates
             }
+            
+            # 确保user_state是字典
+            if not isinstance(user_state, dict):
+                user_state = {}
+            if not isinstance(margin_summary, dict):
+                margin_summary = {}
+            
+            # 更新portfolio_data中的user_state和margin_summary
+            portfolio_data["userState"] = user_state
+            portfolio_data["marginSummary"] = margin_summary
             
             print(f"成功获取数据: {len(fills)} 条成交记录, {len(asset_positions)} 个持仓")
             return portfolio_data
@@ -274,7 +244,7 @@ def main():
     client = HyperliquidAPIClient()
     
     # 测试地址（请替换为真实地址）
-    test_address = "0x1234567890123456789012345678901234567890"
+    test_address = "0x7717a7a245d9f950e586822b8c9b46863ed7bd7e"
     
     if client.validate_user_address(test_address):
         print(f"测试地址格式有效: {test_address}")
@@ -295,7 +265,7 @@ def main():
                     print(f"已用保证金: ${margin_summary.get('totalMarginUsed', 0):,.2f}")
             else:
                 print("未能获取投资组合数据")
-                
+            # print(portfolio_data)
         except Exception as e:
             print(f"测试失败: {e}")
     else:

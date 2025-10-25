@@ -722,7 +722,7 @@ def main():
     calculator = ApexCalculator()
     
     # 示例用户地址 (请替换为真实地址)
-    user_address = "0x1234567890123456789012345678901234567890"
+    user_address = "0x7717a7a245d9f950e586822b8c9b46863ed7bd7e"
     
     print("请提供有效的Hyperliquid用户地址进行分析")
     print("示例地址格式: 0x1234567890123456789012345678901234567890")
