@@ -1,15 +1,20 @@
 # Apex Fork - Profit Factor and Sharpe Ratio Calculator
 
-This Python implementation replicates the exact algorithms used by [Apex Liquid Bot](https://apexliquid.bot) for calculating trading performance metrics.
+基于Hyperliquid官方API和Apex Liquid Bot算法的完整交易分析工具。
+
+This Python implementation replicates the exact algorithms used by [Apex Liquid Bot](https://apexliquid.bot) for calculating trading performance metrics, with direct integration to [Hyperliquid's official API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api).
 
 ## 🎯 Features
 
-- **Profit Factor Calculation** - Ratio of total gains to total losses
-- **Sharpe Ratio Calculation** - Risk-adjusted return metric
-- **Win Rate Analysis** - Trading success statistics
-- **ROE Calculation** - Return on Equity
-- **Max Drawdown Analysis** - Risk assessment
-- **Hold Time Statistics** - Position duration analysis
+- **🔄 实时数据获取** - 直接从Hyperliquid官方API获取真实交易数据
+- **📊 Profit Factor计算** - 总盈利与总亏损的比率
+- **📈 Sharpe Ratio计算** - 风险调整后的收益指标
+- **🎯 Win Rate分析** - 交易成功率统计
+- **💰 ROE计算** - 净资产收益率
+- **📉 Max Drawdown分析** - 风险评估
+- **⏱️ Hold Time统计** - 持仓时间分析
+- **💾 智能缓存** - 5分钟数据缓存，减少API调用
+- **🔍 多用户分析** - 支持批量分析多个用户
 
 ## 📊 Algorithms Extracted
 
@@ -22,44 +27,51 @@ The algorithms were extracted from the following JavaScript files:
 
 ## 🚀 Quick Start
 
+### 基本使用
+
 ```python
 from apex_fork import ApexCalculator
 
-# Initialize calculator
+# 初始化计算器
 calculator = ApexCalculator()
 
-# Sample trade data
-fills = [
-    {'closedPnl': 100.50, 'dir': 'Close Long'},
-    {'closedPnl': -50.25, 'dir': 'Close Short'},
-    {'closedPnl': 200.75, 'dir': 'Close Long'}
+# 分析用户交易表现
+user_address = "0x1234567890123456789012345678901234567890"
+results = calculator.analyze_user(user_address)
+
+print(f"Profit Factor: {results.get('profit_factor', 0)}")
+print(f"Sharpe Ratio: {results.get('sharpe_ratio', 0):.4f}")
+print(f"Win Rate: {results.get('win_rate', {}).get('winRate', 0):.2f}%")
+```
+
+### 高级使用
+
+```python
+# 获取特定数据
+fills = calculator.get_user_fills(user_address)
+positions = calculator.get_user_asset_positions(user_address)
+margin_summary = calculator.get_user_margin_summary(user_address)
+
+# 计算特定指标
+profit_factor = calculator.calculate_profit_factor(fills, positions)
+win_stats = calculator.calculate_win_rate(fills)
+
+# 强制刷新数据（不使用缓存）
+results = calculator.analyze_user(user_address, force_refresh=True)
+```
+
+### 批量分析
+
+```python
+# 分析多个用户
+user_addresses = [
+    "0x1234567890123456789012345678901234567890",
+    "0x0987654321098765432109876543210987654321"
 ]
 
-# Calculate Profit Factor
-profit_factor = calculator.calculate_profit_factor(fills)
-print(f"Profit Factor: {profit_factor}")
-
-# Calculate Sharpe Ratio
-portfolio_data = [
-    [
-        "perpAllTime",
-        {
-            "accountValueHistory": [
-                [1640995200000, 10000],
-                [1641081600000, 10100],
-                [1641168000000, 10050]
-            ],
-            "pnlHistory": [
-                [1640995200000, 0],
-                [1641081600000, 100],
-                [1641168000000, 50]
-            ]
-        }
-    ]
-]
-
-sharpe_ratio = calculator.calculate_sharpe_ratio(portfolio_data)
-print(f"Sharpe Ratio: {sharpe_ratio:.4f}")
+for address in user_addresses:
+    results = calculator.analyze_user(address)
+    print(f"用户 {address}: PF={results.get('profit_factor', 0)}")
 ```
 
 ## 📈 Profit Factor Algorithm
@@ -228,7 +240,36 @@ Calculate average hold time statistics.
 ## 🔧 Dependencies
 
 - Python 3.7+
-- No external dependencies (uses only standard library)
+- requests (for API calls)
+- 使用uv管理依赖: `uv add requests`
+
+## 🌐 API Integration
+
+### Hyperliquid API支持
+
+本工具直接集成Hyperliquid官方API，支持以下数据获取：
+
+- **用户成交记录** (`userFills`) - 获取所有历史交易
+- **用户账户状态** (`clearinghouseState`) - 获取当前账户信息
+- **资产持仓** (`assetPositions`) - 获取当前持仓详情
+- **保证金摘要** (`marginSummary`) - 获取账户价值和保证金使用情况
+- **历史PnL** (`historicalPnl`) - 获取历史盈亏数据
+- **未成交订单** (`openOrders`) - 获取当前挂单
+- **TWAP成交** (`userTwapSliceFills`) - 获取TWAP交易记录
+- **资金历史** (`fundingHistory`) - 获取资金变动记录
+- **账本更新** (`ledgerUpdates`) - 获取账本变更记录
+
+### API端点
+
+- **基础URL**: `https://api.hyperliquid.xyz`
+- **主要端点**: `/info` (POST请求)
+- **文档**: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api
+
+### 数据缓存
+
+- **缓存时间**: 5分钟
+- **缓存策略**: 自动缓存API响应，减少重复请求
+- **强制刷新**: 支持`force_refresh=True`参数强制获取最新数据
 
 ## 📝 Notes
 
