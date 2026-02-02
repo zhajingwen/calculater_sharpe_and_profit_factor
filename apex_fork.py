@@ -1,0 +1,1025 @@
+"""
+Apex Liquid Bot - 盈亏因子和夏普比率计算器
+基于Hyperliquid官方API和Apex Liquid Bot算法实现
+
+本模块实现了Apex Liquid Bot用于计算以下指标的精确算法：
+1. Profit Factor（盈亏因子）- 总盈利与总亏损的比率
+2. Sharpe Ratio（夏普比率）- 风险调整后的收益指标
+
+功能特性：
+- 直接从Hyperliquid官方API获取真实交易数据
+- 基于Apex Liquid Bot的精确算法计算
+- 支持完整的交易分析功能
+- 高精度计算（50位精度）
+- 智能缓存机制（5分钟TTL）
+
+API文档: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api
+算法来源:
+- https://apexliquid.bot/assets/index-DmUy_5PH.js
+- https://apexliquid.bot/assets/AssetPositionsTable-B8MWksSt.js
+- https://apexliquid.bot/assets/hyperliquidWs-4Ciu49Um.js
+- https://apexliquid.bot/assets/OpenOrdersTableNew-GSqIAf20.js
+- https://apexliquid.bot/assets/RecentFillsTable-B8_vbQuR.js
+"""
+
+import math
+import time
+from typing import List, Dict, Any, Optional, Union
+from decimal import Decimal, getcontext
+from datetime import datetime, timedelta
+from hyperliquid_api_client import HyperliquidAPIClient, safe_float, safe_int
+
+# 设置高精度小数计算（50位精度）
+getcontext().prec = 50
+
+
+class ApexCalculator:
+    """
+    Apex Liquid Bot算法计算器主类
+
+    功能：
+    - 集成Hyperliquid官方API获取交易数据
+    - 实现Apex Liquid Bot的核心算法
+    - 提供完整的交易分析功能
+    - 智能缓存机制提升性能
+
+    属性：
+        precision: 计算精度（位数）
+        api_client: Hyperliquid API客户端
+        cache: 数据缓存字典
+        cache_ttl: 缓存过期时间（秒）
+    """
+
+    def __init__(self, api_base_url: str = "https://api.hyperliquid.xyz"):
+        """
+        初始化计算器
+
+        参数：
+            api_base_url: Hyperliquid API基础URL
+        """
+        self.precision = 50
+        self.api_client = HyperliquidAPIClient(api_base_url)
+        self.cache = {}  # 数据缓存字典
+        self.cache_ttl = 300  # 缓存有效期：5分钟
+    
+    def _is_cache_valid(self, key: str) -> bool:
+        """
+        检查缓存是否有效
+
+        参数：
+            key: 缓存键
+
+        返回：
+            bool: 缓存是否有效且未过期
+        """
+        if key not in self.cache:
+            return False
+        return time.time() - self.cache[key]['timestamp'] < self.cache_ttl
+
+    def _get_cached_data(self, key: str) -> Optional[Any]:
+        """
+        获取缓存数据
+
+        参数：
+            key: 缓存键
+
+        返回：
+            缓存的数据，如果缓存无效则返回None
+        """
+        if self._is_cache_valid(key):
+            return self.cache[key]['data']
+        return None
+
+    def _set_cache_data(self, key: str, data: Any) -> None:
+        """
+        设置缓存数据
+
+        参数：
+            key: 缓存键
+            data: 要缓存的数据
+        """
+        self.cache[key] = {
+            'data': data,
+            'timestamp': time.time()
+        }
+    
+    def get_user_data(self, user_address: str, force_refresh: bool = False) -> Dict[str, Any]:
+        """
+        获取用户完整交易数据
+
+        参数：
+            user_address: 用户钱包地址
+            force_refresh: 是否强制刷新缓存（跳过缓存）
+
+        返回：
+            用户完整数据字典，包含成交记录、持仓、保证金等信息
+
+        异常：
+            ValueError: 地址格式无效
+            Exception: API请求失败
+        """
+        cache_key = f"user_data_{user_address}"
+
+        # 尝试使用缓存
+        if not force_refresh:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                print(f"✓ 使用缓存数据: {user_address}")
+                return cached_data
+
+        print(f"→ 从API获取数据: {user_address}")
+
+        try:
+            # 验证地址格式
+            if not self.api_client.validate_user_address(user_address):
+                raise ValueError(f"无效的用户地址格式: {user_address}")
+
+            # 获取完整投资组合数据
+            portfolio_data = self.api_client.get_user_portfolio_data(user_address)
+
+            if not portfolio_data:
+                raise Exception("未能获取用户数据，可能地址无交易记录或API不可用")
+
+            # 缓存数据
+            self._set_cache_data(cache_key, portfolio_data)
+            print(f"✓ 数据获取成功并已缓存")
+
+            return portfolio_data
+
+        except ValueError as e:
+            print(f"✗ 地址验证失败: {e}")
+            raise
+        except Exception as e:
+            print(f"✗ 获取用户数据失败: {e}")
+            return {}
+    
+    def get_user_fills(self, user_address: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """
+        获取用户成交记录
+
+        参数：
+            user_address: 用户钱包地址
+            force_refresh: 是否强制刷新缓存
+
+        返回：
+            成交记录列表，包含交易时间、价格、数量、PnL等信息
+        """
+        cache_key = f"fills_{user_address}"
+
+        if not force_refresh:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                return cached_data
+
+        try:
+            fills = self.api_client.get_user_fills(user_address)
+            self._set_cache_data(cache_key, fills)
+            return fills
+        except Exception as e:
+            print(f"✗ 获取成交记录失败: {e}")
+            return []
+
+    def get_user_asset_positions(self, user_address: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """
+        获取用户当前资产持仓
+
+        参数：
+            user_address: 用户钱包地址
+            force_refresh: 是否强制刷新缓存
+
+        返回：
+            资产持仓列表，包含持仓数量、未实现盈亏等信息
+        """
+        cache_key = f"positions_{user_address}"
+
+        if not force_refresh:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                return cached_data
+
+        try:
+            positions = self.api_client.get_user_asset_positions(user_address)
+            self._set_cache_data(cache_key, positions)
+            return positions
+        except Exception as e:
+            print(f"✗ 获取资产持仓失败: {e}")
+            return []
+
+    def get_user_margin_summary(self, user_address: str, force_refresh: bool = False) -> Dict[str, Any]:
+        """
+        获取用户保证金摘要
+
+        参数：
+            user_address: 用户钱包地址
+            force_refresh: 是否强制刷新缓存
+
+        返回：
+            保证金摘要数据，包含账户价值、已用保证金等信息
+        """
+        cache_key = f"margin_{user_address}"
+
+        if not force_refresh:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                return cached_data
+
+        try:
+            margin_summary = self.api_client.get_user_margin_summary(user_address)
+            self._set_cache_data(cache_key, margin_summary)
+            return margin_summary
+        except Exception as e:
+            print(f"✗ 获取保证金摘要失败: {e}")
+            return {}
+    
+    def calculate_profit_factor(self, fills: List[Dict], asset_positions: Optional[List[Dict]] = None) -> Union[float, str]:
+        """
+        计算盈亏因子（基于Apex Liquid Bot算法）
+
+        盈亏因子 = 总盈利 / 总亏损
+        该指标反映了交易策略的盈利能力，大于1表示盈利，小于1表示亏损
+
+        参数：
+            fills: 成交记录列表，包含'closedPnl'字段（已实现盈亏）
+            asset_positions: 可选的当前持仓列表，包含'unrealizedPnl'字段（未实现盈亏）
+
+        返回：
+            - float: 盈亏因子数值
+            - "1000+": 只有盈利没有亏损时
+            - 0: 无交易记录时
+
+        算法说明：
+            1. 累计所有已实现盈亏（来自fills）
+            2. 累计所有未实现盈亏（来自当前持仓）
+            3. 计算总盈利和总亏损的比值
+        """
+        if not fills and not asset_positions:
+            return 0
+
+        total_gains = Decimal('0')
+        total_losses = Decimal('0')
+
+        # 处理已实现盈亏（来自成交记录）
+        for fill in fills:
+            closed_pnl = Decimal(str(fill.get('closedPnl', 0)))
+            if closed_pnl > 0:
+                total_gains += closed_pnl
+            elif closed_pnl < 0:
+                total_losses += abs(closed_pnl)
+
+        # 处理未实现盈亏（来自当前持仓）
+        if asset_positions:
+            for position in asset_positions:
+                unrealized_pnl = Decimal(str(position.get('position', {}).get('unrealizedPnl', 0)))
+                if unrealized_pnl > 0:
+                    total_gains += unrealized_pnl
+                elif unrealized_pnl < 0:
+                    total_losses += abs(unrealized_pnl)
+
+        # 计算盈亏因子
+        if total_losses == 0:
+            return "1000+" if total_gains > 0 else 0
+
+        profit_factor = total_gains / total_losses
+        return float(profit_factor)
+
+    def calculate_win_rate(self, fills: List[Dict]) -> Dict[str, float]:
+        """
+        计算胜率和交易统计信息
+
+        参数：
+            fills: 成交记录列表
+
+        返回：
+            字典，包含：
+            - winRate: 胜率（百分比）
+            - bias: 方向偏好（0-100，50为中性，>50偏多，<50偏空）
+            - totalTrades: 总交易次数
+
+        算法说明：
+            1. 统计盈利和亏损交易次数
+            2. 统计多头和空头交易次数
+            3. 计算胜率 = 盈利次数 / 总次数
+            4. 计算方向偏好 = (多头-空头) / 总数
+        """
+        if not fills:
+            return {"winRate": 0, "bias": 50, "totalTrades": 0}
+
+        long_trades = 0
+        short_trades = 0
+        winning_trades = 0
+        losing_trades = 0
+
+        for fill in fills:
+            # 安全获取已实现盈亏
+            closed_pnl_value = fill.get('closedPnl')
+            if closed_pnl_value is None:
+                continue
+
+            closed_pnl = Decimal(str(closed_pnl_value))
+            direction = fill.get('dir', '').strip()
+
+            # 标准化方向判断（不区分大小写）
+            direction_lower = direction.lower()
+
+            # 统计交易方向（多头/空头）
+            if any(term in direction_lower for term in ['open long', 'close long']):
+                if 'short' not in direction_lower or direction_lower.endswith('long'):
+                    long_trades += 1
+            elif 'short > long' in direction_lower or 'short>long' in direction_lower:
+                long_trades += 1
+            elif any(term in direction_lower for term in ['open short', 'close short']):
+                if 'long' not in direction_lower or direction_lower.endswith('short'):
+                    short_trades += 1
+            elif 'long > short' in direction_lower or 'long>short' in direction_lower:
+                short_trades += 1
+
+            # 统计盈亏次数（排除零盈亏）
+            if closed_pnl != 0:
+                if closed_pnl > 0:
+                    winning_trades += 1
+                else:
+                    losing_trades += 1
+
+        total_trades = len(fills)
+        total_pnl_trades = winning_trades + losing_trades
+
+        # 计算胜率
+        win_rate = (winning_trades / total_pnl_trades * 100) if total_pnl_trades > 0 else 0
+
+        # 计算方向偏好（多空倾向）
+        bias = ((long_trades - short_trades) / total_trades * 100 + 100) / 2 if total_trades > 0 else 50
+
+        return {
+            "winRate": win_rate,
+            "bias": bias,
+            "totalTrades": total_trades
+        }
+    
+    def calculate_roe(self, portfolio_data: List[Dict], period: str = "perpAllTime") -> float:
+        """
+        计算股本回报率ROE（基于Apex Liquid Bot算法）
+
+        ROE = (净收益 / 加权平均资本) × 100%
+        该指标衡量资金使用效率，考虑了出入金的影响
+
+        参数：
+            portfolio_data: 投资组合数据，包含accountValueHistory和pnlHistory
+            period: 时间周期过滤器（默认"perpAllTime"）
+
+        返回：
+            float: ROE百分比
+
+        算法说明：
+            1. 识别所有出入金流水
+            2. 计算净收益（排除出入金影响）
+            3. 计算加权平均资本
+            4. 应用ROE公式
+        """
+        # 根据时间周期过滤数据
+        filtered_data = [item for item in portfolio_data if item[0] == period]
+        if not filtered_data:
+            return 0.0
+
+        data = filtered_data[0][1]
+        account_history = data.get('accountValueHistory', [])
+        pnl_history = data.get('pnlHistory', [])
+
+        if not account_history or len(account_history) < 2:
+            return 0.0
+
+        # 获取初始和最终余额
+        initial_balance = Decimal(str(account_history[0][1]))
+        final_balance = Decimal(str(account_history[-1][1]))
+
+        # 计算现金流（出入金）
+        cash_flows = []
+        for i in range(1, len(account_history)):
+            current_balance = Decimal(str(account_history[i][1]))
+            previous_balance = Decimal(str(account_history[i-1][1]))
+            current_pnl = Decimal(str(pnl_history[i][1])) if i < len(pnl_history) else Decimal('0')
+            previous_pnl = Decimal(str(pnl_history[i-1][1])) if i-1 < len(pnl_history) else Decimal('0')
+
+            # 计算出入金流量
+            expected_balance = previous_balance + (current_pnl - previous_pnl)
+            cash_flow = current_balance - expected_balance
+
+            # 只记录显著的现金流（>1e-9）
+            if abs(cash_flow) > Decimal('1e-9'):
+                cash_flows.append({
+                    'amount': cash_flow,
+                    'date': account_history[i][0]
+                })
+
+        # 计算加权平均资本和ROI
+        total_cash_flows = sum(cf['amount'] for cf in cash_flows)
+        net_income = final_balance - initial_balance - total_cash_flows
+
+        # 计算加权平均资本（简化方法）
+        weighted_capital = initial_balance
+        for cf in cash_flows:
+            # 按周期内剩余时间加权
+            weighted_capital += cf['amount'] * Decimal('0.5')  # 简化权重
+
+        if weighted_capital == 0:
+            return 0.0
+
+        roi = (net_income / weighted_capital) * 100
+        return float(roi)
+    
+    
+    def calculate_hold_time_stats(self, fills: List[Dict]) -> Dict[str, float]:
+        """
+        计算平均持仓时间统计（通过配对开仓/平仓交易）
+
+        参数：
+            fills: 成交记录列表，包含'time'、'dir'和'coin'字段
+
+        返回：
+            字典，包含不同时间段的平均持仓时间（天数）：
+            - todayCount: 今日平均持仓时间
+            - last7DaysAverage: 最近7天平均持仓时间
+            - last30DaysAverage: 最近30天平均持仓时间
+            - allTimeAverage: 全部时间平均持仓时间
+
+        算法说明：
+            1. 按币种对开仓和平仓交易进行配对
+            2. 计算每对交易的持仓时长
+            3. 按时间段统计平均值
+        """
+        if not fills:
+            return {
+                "todayCount": 0,
+                "last7DaysAverage": 0,
+                "last30DaysAverage": 0,
+                "allTimeAverage": 0
+            }
+
+        from datetime import datetime, timedelta
+        from collections import defaultdict
+
+        now = datetime.now()
+        today_start = datetime(now.year, now.month, now.day)
+        week_ago = today_start - timedelta(days=7)
+        month_ago = today_start - timedelta(days=30)
+
+        # 按币种分组并配对开仓/平仓交易
+        coin_positions = defaultdict(list)  # {币种: [(开仓时间, 平仓时间), ...]}
+        coin_open_trades = defaultdict(list)  # {币种: [开仓时间1, 开仓时间2, ...]}
+
+        # 按时间排序
+        sorted_fills = sorted(fills, key=lambda x: x.get('time', 0))
+
+        for fill in sorted_fills:
+            coin = fill.get('coin', '')
+            direction = fill.get('dir', '')
+            timestamp = fill.get('time', 0)
+
+            if not coin or not timestamp:
+                continue
+
+            # 识别开仓交易
+            if 'Open' in direction:
+                coin_open_trades[coin].append(timestamp)
+
+            # 识别平仓交易并配对
+            elif 'Close' in direction:
+                if coin_open_trades[coin]:
+                    open_time = coin_open_trades[coin].pop(0)  # FIFO配对
+                    coin_positions[coin].append((open_time, timestamp))
+
+        # 计算所有配对交易的持仓时间
+        today_hold_times = []
+        week_hold_times = []
+        month_hold_times = []
+        all_hold_times = []
+
+        for coin, positions in coin_positions.items():
+            for open_time, close_time in positions:
+                open_dt = datetime.fromtimestamp(open_time / 1000)
+                close_dt = datetime.fromtimestamp(close_time / 1000)
+
+                hold_time_days = (close_dt - open_dt).total_seconds() / 86400
+                all_hold_times.append(hold_time_days)
+
+                # 按时间段分类
+                if close_dt >= today_start:
+                    today_hold_times.append(hold_time_days)
+
+                if close_dt >= week_ago:
+                    week_hold_times.append(hold_time_days)
+
+                if close_dt >= month_ago:
+                    month_hold_times.append(hold_time_days)
+
+        return {
+            "todayCount": sum(today_hold_times) / len(today_hold_times) if today_hold_times else 0,
+            "last7DaysAverage": sum(week_hold_times) / len(week_hold_times) if week_hold_times else 0,
+            "last30DaysAverage": sum(month_hold_times) / len(month_hold_times) if month_hold_times else 0,
+            "allTimeAverage": sum(all_hold_times) / len(all_hold_times) if all_hold_times else 0
+        }
+    
+    def analyze_user(self, user_address: str, force_refresh: bool = False) -> Dict[str, Any]:
+        """
+        分析用户交易表现（主要方法）
+
+        该方法执行完整的交易分析，计算所有关键指标
+
+        参数：
+            user_address: 用户钱包地址
+            force_refresh: 是否强制刷新缓存数据
+
+        返回：
+            完整的分析结果字典，包含：
+            - 盈亏因子 (Profit Factor)
+            - 夏普比率 (Sharpe Ratio)
+            - 胜率统计 (Win Rate)
+            - 最大回撤 (Max Drawdown)
+            - 持仓时间统计 (Hold Time Stats)
+            - 当前持仓分析 (Position Analysis)
+            - 原始数据摘要 (Data Summary)
+
+        异常：
+            捕获所有异常并返回错误信息
+        """
+        print(f"\n{'='*60}")
+        print(f"🔍 开始分析用户: {user_address}")
+        print(f"{'='*60}")
+
+        try:
+            # 步骤1: 获取用户数据
+            user_data = self.get_user_data(user_address, force_refresh)
+
+            if not user_data:
+                return {"error": "无法获取用户数据，请检查地址是否正确或网络连接"}
+
+            # 步骤2: 提取核心数据
+            fills = user_data.get('fills', [])
+            asset_positions = user_data.get('assetPositions', [])
+            margin_summary = user_data.get('marginSummary', {})
+
+            print(f"\n📊 数据获取完成:")
+            print(f"  ✓ 成交记录: {len(fills)} 条")
+            print(f"  ✓ 当前持仓: {len(asset_positions)} 个")
+
+            # 步骤4: 初始化结果字典
+            results = {
+                "user_address": user_address,
+                "analysis_timestamp": datetime.now().isoformat(),
+                "_raw_fills": fills,  # 保存原始数据供报告生成使用
+                "data_summary": {
+                    "total_fills": len(fills),
+                    "total_positions": len(asset_positions),
+                    "account_value": safe_float(margin_summary.get('accountValue')),
+                    "total_margin_used": safe_float(margin_summary.get('totalMarginUsed'))
+                }
+            }
+
+            print(f"\n📈 计算交易指标:")
+
+            # 指标1: 盈亏因子 (Profit Factor)
+            if fills:
+                profit_factor = self.calculate_profit_factor(fills, asset_positions)
+                results["profit_factor"] = profit_factor
+                print(f"  ✓ Profit Factor: {profit_factor}")
+            else:
+                results["profit_factor"] = 0
+                print(f"  ⚠ Profit Factor: 无成交记录")
+
+            # 指标2: 夏普比率 (Sharpe Ratio) - 交易级别算法
+            if fills and len(fills) > 1:
+                sharpe_result = self.calculate_trade_level_sharpe_ratio(fills)
+                results["sharpe_ratio"] = sharpe_result["sharpe_ratio"]
+                results["annualized_sharpe"] = sharpe_result["annualized_sharpe"]
+                print(f"  ✓ Sharpe Ratio (每笔交易): {sharpe_result['sharpe_ratio']:.4f}")
+                print(f"  ✓ Sharpe Ratio (年化): {sharpe_result['annualized_sharpe']:.2f}")
+                print(f"    - 平均每笔收益率: {sharpe_result['mean_return_per_trade']*100:.2f}%")
+                print(f"    - 收益率标准差: {sharpe_result['std_dev']*100:.2f}%")
+            else:
+                results["sharpe_ratio"] = 0
+                results["annualized_sharpe"] = 0
+                print(f"  ⚠ Sharpe Ratio: 数据不足")
+
+            # 指标3: 胜率统计 (Win Rate)
+            if fills:
+                win_stats = self.calculate_win_rate(fills)
+                results["win_rate"] = win_stats
+                print(f"  ✓ Win Rate: {win_stats['winRate']:.2f}%")
+                print(f"    - 方向偏好: {win_stats['bias']:.2f}% ({'多头' if win_stats['bias'] > 50 else '空头' if win_stats['bias'] < 50 else '中性'})")
+                print(f"    - 总交易次数: {win_stats['totalTrades']}")
+            else:
+                results["win_rate"] = {"winRate": 0, "bias": 50, "totalTrades": 0}
+                print(f"  ⚠ Win Rate: 无成交记录")
+
+            # 指标4: 最大回撤 (Max Drawdown) - 交易级别算法
+            if fills:
+                max_dd_result = self.calculate_trade_level_max_drawdown(fills)
+                results["max_drawdown"] = max_dd_result["max_drawdown_pct"]
+                results["max_drawdown_detail"] = max_dd_result
+                print(f"  ✓ Max Drawdown: {max_dd_result['max_drawdown_pct']:.2f}%")
+                print(f"    - 峰值收益率: {max_dd_result['peak_return']:.2f}%")
+                print(f"    - 谷底收益率: {max_dd_result['trough_return']:.2f}%")
+                print(f"    - 分析交易数: {max_dd_result['total_trades']}")
+            else:
+                results["max_drawdown"] = 0
+                results["max_drawdown_detail"] = {
+                    "max_drawdown_pct": 0,
+                    "peak_return": 0,
+                    "trough_return": 0,
+                    "total_trades": 0
+                }
+                print(f"  ⚠ Max Drawdown: 无成交记录")
+
+            # 指标5: 持仓时间统计 (Hold Time Stats)
+            if fills:
+                hold_stats = self.calculate_hold_time_stats(fills)
+                results["hold_time_stats"] = hold_stats
+                print(f"  ✓ 平均持仓时间: {hold_stats['allTimeAverage']:.2f} 天")
+            else:
+                results["hold_time_stats"] = {
+                    "todayCount": 0, "last7DaysAverage": 0,
+                    "last30DaysAverage": 0, "allTimeAverage": 0
+                }
+                print(f"  ⚠ 持仓时间统计: 无成交记录")
+
+            # 指标6: 当前持仓分析 (Current Positions)
+            if asset_positions:
+                position_analysis = self._analyze_current_positions(asset_positions)
+                results["position_analysis"] = position_analysis
+                print(f"  ✓ 当前持仓: {len(asset_positions)} 个活跃仓位")
+                print(f"    - 总未实现盈亏: ${position_analysis.get('total_unrealized_pnl', 0):.2f}")
+                print(f"    - 仓位偏好: {position_analysis.get('position_bias', 'Unknown')}")
+            else:
+                results["position_analysis"] = {"total_positions": 0, "total_unrealized_pnl": 0}
+                print(f"  ⚠ 当前持仓: 无持仓")
+
+            print(f"\n{'='*60}")
+            print("✅ 分析完成!")
+            print(f"{'='*60}")
+
+            return results
+
+        except Exception as e:
+            error_msg = f"分析过程中发生错误: {str(e)}"
+            print(f"\n✗ {error_msg}")
+            import traceback
+            print(f"详细错误信息:\n{traceback.format_exc()}")
+            return {"error": error_msg}
+
+    def _analyze_current_positions(self, asset_positions: List[Dict]) -> Dict[str, Any]:
+        """
+        分析当前持仓状态
+
+        参数：
+            asset_positions: 资产持仓列表
+
+        返回：
+            持仓分析结果字典，包含：
+            - total_positions: 总持仓数
+            - total_unrealized_pnl: 总未实现盈亏
+            - total_position_value: 总持仓价值
+            - long_positions: 多头仓位数
+            - short_positions: 空头仓位数
+            - position_bias: 仓位偏好（多头/空头/中性）
+
+        算法说明：
+            1. 遍历所有持仓，累计未实现盈亏和仓位价值
+            2. 根据持仓数量正负判断多空方向
+            3. 统计多空仓位数量和偏好
+        """
+        total_unrealized_pnl = 0
+        total_position_value = 0
+        long_positions = 0
+        short_positions = 0
+
+        for position in asset_positions:
+            pos_data = position.get('position', {})
+            # 安全转换数值类型
+            unrealized_pnl = safe_float(pos_data.get('unrealizedPnl'))
+            position_value = safe_float(pos_data.get('positionValue'))
+            size = safe_float(pos_data.get('szi'))
+
+            total_unrealized_pnl += unrealized_pnl
+            total_position_value += position_value
+
+            # 根据持仓数量判断方向
+            if size > 0:
+                long_positions += 1
+            elif size < 0:
+                short_positions += 1
+
+        # 判断仓位偏好
+        if long_positions > short_positions:
+            bias = "多头"
+        elif short_positions > long_positions:
+            bias = "空头"
+        else:
+            bias = "中性"
+
+        return {
+            "total_positions": len(asset_positions),
+            "total_unrealized_pnl": total_unrealized_pnl,
+            "total_position_value": total_position_value,
+            "long_positions": long_positions,
+            "short_positions": short_positions,
+            "position_bias": bias
+        }
+
+    def calculate_trade_level_sharpe_ratio(self, fills: List[Dict], risk_free_rate: float = 0.03) -> Dict[str, float]:
+        """
+        计算交易级别的夏普比率（不受出入金影响）
+
+        该方法基于单笔交易收益率计算夏普比率，完全独立于账户价值变化
+
+        参数：
+            fills: 成交记录列表
+            risk_free_rate: 无风险利率（年化，默认3%）
+
+        返回：
+            字典，包含：
+            - sharpe_ratio: 每笔交易的夏普比率
+            - annualized_sharpe: 年化夏普比率
+            - mean_return_per_trade: 平均每笔收益率
+            - std_dev: 收益率标准差
+            - total_trades: 分析的交易数量
+
+        算法说明：
+            1. 对每笔有PnL的交易，计算收益率 = PnL / Position_Value
+            2. 基于收益率序列计算均值和标准差
+            3. Sharpe = (mean_return - rf) / std_dev
+            4. 年化Sharpe = 每笔交易Sharpe × sqrt(年交易次数)
+
+        优势：
+            - 完全不依赖账户价值
+            - 不受出入金影响
+            - 真实反映交易策略的风险收益比
+        """
+        trade_returns = []
+
+        # 遍历所有成交记录，提取平仓交易的收益率
+        for fill in fills:
+            closed_pnl = float(fill.get('closedPnl', 0))
+
+            # 只分析平仓交易（有PnL的交易）
+            if closed_pnl == 0:
+                continue
+
+            # 计算仓位价值 = 价格 × 数量
+            px = float(fill.get('px', 0))
+            sz = abs(float(fill.get('sz', 0)))
+            position_value = px * sz
+
+            if position_value > 0:
+                # 计算交易收益率 = PnL / 仓位价值
+                trade_return = closed_pnl / position_value
+                trade_returns.append(trade_return)
+
+        # 数据不足时返回零值
+        if len(trade_returns) < 2:
+            return {
+                "sharpe_ratio": 0,
+                "annualized_sharpe": 0,
+                "mean_return_per_trade": 0,
+                "std_dev": 0,
+                "total_trades": 0
+            }
+
+        # 计算统计量：均值、方差、标准差
+        mean_return = sum(trade_returns) / len(trade_returns)
+        variance = sum((r - mean_return) ** 2 for r in trade_returns) / (len(trade_returns) - 1)
+        std_dev = math.sqrt(variance)
+
+        # 标准差为零时无法计算夏普比率
+        if std_dev == 0:
+            return {
+                "sharpe_ratio": 0,
+                "annualized_sharpe": 0,
+                "mean_return_per_trade": mean_return,
+                "std_dev": 0,
+                "total_trades": len(trade_returns)
+            }
+
+        # 从实际数据计算平均持仓时间
+        hold_stats = self.calculate_hold_time_stats(fills)
+        avg_hold_days = hold_stats['allTimeAverage']
+
+        # 如果没有持仓数据或持仓时间为0，使用默认值1天（保守估计）
+        if avg_hold_days <= 0:
+            avg_hold_days = 1.0
+
+        # 计算每笔交易的无风险收益率（基于实际平均持仓时间）
+        trade_rf_rate = (1 + risk_free_rate) ** (avg_hold_days / 365) - 1
+
+        # 计算每笔交易的夏普比率
+        sharpe_per_trade = (mean_return - trade_rf_rate) / std_dev
+
+        # 推算年交易次数（用于年化）
+        first_trade_time = next((f['time'] for f in fills if float(f.get('closedPnl', 0)) != 0), 0)
+        last_trade_time = next((f['time'] for f in reversed(fills) if float(f.get('closedPnl', 0)) != 0), 0)
+
+        if first_trade_time and last_trade_time:
+            days = (last_trade_time - first_trade_time) / 1000 / 86400
+            trades_per_year = len(trade_returns) / days * 365 if days > 0 else 365
+        else:
+            trades_per_year = 365  # 加密货币市场7×24小时交易，使用365天
+
+        # 年化夏普比率 = 每笔交易夏普 × sqrt(年交易次数)
+        annualized_sharpe = sharpe_per_trade * math.sqrt(trades_per_year)
+
+        return {
+            "sharpe_ratio": sharpe_per_trade,
+            "annualized_sharpe": annualized_sharpe,
+            "mean_return_per_trade": mean_return,
+            "std_dev": std_dev,
+            "total_trades": len(trade_returns)
+        }
+
+    def calculate_trade_level_max_drawdown(self, fills: List[Dict]) -> Dict[str, float]:
+        """
+        计算交易级别的最大回撤（不受出入金影响）
+
+        该方法基于累计收益率计算最大回撤，完全独立于账户价值变化
+
+        参数：
+            fills: 成交记录列表
+
+        返回：
+            字典，包含：
+            - max_drawdown_pct: 最大回撤百分比
+            - peak_return: 峰值累计收益率（百分比）
+            - trough_return: 谷底累计收益率（百分比）
+            - total_trades: 分析的交易数量
+
+        算法说明：
+            1. 构建累计收益率序列（不是累计PnL）
+            2. 每笔交易后，累计收益率 *= (1 + 当前交易收益率)
+            3. 追踪峰值，计算每个点相对峰值的回撤
+            4. 记录最大回撤及对应的峰值和谷底
+
+        优势：
+            - 不需要初始资金
+            - 不受出入金影响
+            - 真实反映交易策略的风险暴露
+        """
+        trade_returns = []
+
+        # 提取每笔平仓交易的收益率
+        for fill in fills:
+            closed_pnl = float(fill.get('closedPnl', 0))
+
+            # 只分析平仓交易
+            if closed_pnl == 0:
+                continue
+
+            # 计算仓位价值
+            px = float(fill.get('px', 0))
+            sz = abs(float(fill.get('sz', 0)))
+            position_value = px * sz
+
+            if position_value > 0:
+                trade_return = closed_pnl / position_value
+                trade_returns.append(trade_return)
+
+        # 数据不足时返回零值
+        if len(trade_returns) < 2:
+            return {
+                "max_drawdown_pct": 0,
+                "peak_return": 0,
+                "trough_return": 0,
+                "total_trades": 0
+            }
+
+        # 构建累计收益率序列（复利计算）
+        cumulative_returns = []
+        cumulative = 1.0  # 从1.0开始（代表100%本金）
+
+        for ret in trade_returns:
+            cumulative *= (1 + ret)  # 复利累积
+            cumulative_returns.append(cumulative)
+
+        # 计算最大回撤
+        peak = cumulative_returns[0]  # 初始峰值
+        max_drawdown = 0  # 最大回撤
+        trough_value = peak  # 谷底值
+
+        for value in cumulative_returns:
+            # 更新峰值
+            if value > peak:
+                peak = value
+
+            # 计算当前回撤 = (峰值 - 当前值) / 峰值
+            drawdown = (peak - value) / peak * 100
+
+            # 更新最大回撤和谷底
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+                trough_value = value
+
+        return {
+            "max_drawdown_pct": max_drawdown,
+            "peak_return": (peak - 1) * 100,  # 转换为百分比
+            "trough_return": (trough_value - 1) * 100,
+            "total_trades": len(trade_returns)
+        }
+
+
+def main():
+    """
+    主程序入口 - Hyperliquid交易分析示例
+
+    演示如何使用ApexCalculator类分析用户交易表现
+    """
+    print("=" * 70)
+    print("📊 Apex Liquid Bot 交易分析计算器")
+    print("=" * 70)
+    print("基于: Hyperliquid官方API + Apex Liquid Bot算法")
+    print()
+
+    # 初始化计算器
+    calculator = ApexCalculator()
+
+    # 示例用户地址（请替换为真实地址）
+    user_address = "0x7717a7a245d9f950e586822b8c9b46863ed7bd7e"
+
+    print("💡 使用说明:")
+    print("   请提供有效的Hyperliquid用户钱包地址进行分析")
+    print("   地址格式示例: 0x1234567890123456789012345678901234567890")
+    print()
+
+    # 验证地址格式
+    if calculator.api_client.validate_user_address(user_address):
+        print(f"✓ 地址格式验证通过: {user_address}")
+        print(f"→ 开始分析...\n")
+
+        try:
+            # 执行完整交易分析
+            results = calculator.analyze_user(user_address, force_refresh=True)
+
+            # 检查是否有错误
+            if "error" not in results:
+                print("\n" + "=" * 70)
+                print("📈 分析结果摘要")
+                print("=" * 70)
+                print(f"用户地址: {results['user_address']}")
+                print(f"分析时间: {results['analysis_timestamp']}")
+                print()
+
+                # 数据摘要
+                data_summary = results.get('data_summary', {})
+                print("📦 数据摘要:")
+                print(f"  • 成交记录: {data_summary.get('total_fills', 0)} 条")
+                print(f"  • 当前持仓: {data_summary.get('total_positions', 0)} 个")
+                print(f"  • 账户价值: ${data_summary.get('account_value', 0):,.2f}")
+                print(f"  • 已用保证金: ${data_summary.get('total_margin_used', 0):,.2f}")
+                print()
+
+                # 关键指标
+                print("🎯 关键指标:")
+                print(f"  • Profit Factor（盈亏因子）: {results.get('profit_factor', 0)}")
+                print(f"  • Sharpe Ratio（夏普比率）: {results.get('sharpe_ratio', 0):.4f}")
+                print(f"  • Max Drawdown（最大回撤）: {results.get('max_drawdown', 0):.2f}%")
+
+                win_rate = results.get('win_rate', {})
+                print(f"  • Win Rate（胜率）: {win_rate.get('winRate', 0):.2f}%")
+                print(f"  • Direction Bias（方向偏好）: {win_rate.get('bias', 50):.2f}%")
+                print(f"  • Total Trades（总交易次数）: {win_rate.get('totalTrades', 0)}")
+
+                hold_stats = results.get('hold_time_stats', {})
+                print(f"  • Avg Hold Time（平均持仓时间）: {hold_stats.get('allTimeAverage', 0):.2f} 天")
+
+                position_analysis = results.get('position_analysis', {})
+                print(f"  • Current Positions（当前持仓）: {position_analysis.get('total_positions', 0)}")
+                print(f"  • Unrealized PnL（未实现盈亏）: ${position_analysis.get('total_unrealized_pnl', 0):.2f}")
+
+                print("\n" + "=" * 70)
+                print("✅ 分析完成!")
+                print("=" * 70)
+
+            else:
+                print(f"\n✗ 分析失败: {results['error']}")
+
+        except Exception as e:
+            print(f"\n✗ 分析过程中发生错误: {e}")
+            print("\n🔍 故障排查:")
+            print("  1. 检查网络连接是否正常")
+            print("  2. 确认用户地址是否正确")
+            print("  3. 验证Hyperliquid API是否可访问")
+            print("  4. 查看是否存在防火墙或代理限制")
+
+    else:
+        print(f"✗ 地址格式无效: {user_address}")
+        print("⚠ 请提供有效的以太坊地址格式（0x开头，42位十六进制字符）")
+
+    print("\n" + "=" * 70)
+    print("📖 使用说明")
+    print("=" * 70)
+    print("1. 将代码中的 user_address 替换为真实的Hyperliquid用户地址")
+    print("2. 确保网络连接正常，可以访问Hyperliquid API")
+    print("3. 运行脚本即可获取完整的交易分析报告")
+    print("\n📚 参考文档:")
+    print("   Hyperliquid API: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api")
+    print("   Apex Liquid Bot: https://apexliquid.bot/")
+    print("=" * 70)
+
+
+if __name__ == "__main__":
+    main()
