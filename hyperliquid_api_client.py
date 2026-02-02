@@ -119,25 +119,77 @@ class HyperliquidAPIClient:
         # 如果所有重试都失败
         raise Exception(f"API请求失败: 超过最大重试次数")
     
-    def get_user_fills(self, user_address: str) -> List[Dict[str, Any]]:
+    def get_user_fills(self, user_address: str, max_fills: int = 10000) -> List[Dict[str, Any]]:
         """
-        获取用户成交记录
-        
+        获取用户成交记录（支持翻页获取全量数据）
+
+        根据 Hyperliquid API 规则：
+        - 使用 userFillsByTime 端点支持时间范围查询
+        - 每次请求最多返回 2000 条记录
+        - 只能访问最近的 10000 条记录
+        - API 返回顺序：从旧到新（按时间升序）
+        - 通过 startTime 参数进行翻页（向更新的时间前进）
+
         Args:
             user_address: 用户地址
-            
+            max_fills: 最大获取记录数（默认10000，受API限制）
+
         Returns:
-            成交记录列表
+            成交记录列表（按时间升序排列，从最早到最新）
         """
-        payload = {
-            "type": "userFills",
-            "user": user_address
-        }
-        
-        response = self._make_request("/info", payload)
-        if isinstance(response, list):
-            return response
-        return response.get("fills", [])
+        all_fills = []
+        start_time = 0  # 从最早的时间开始
+        page = 0
+
+        print(f"→ 开始获取用户成交记录...")
+
+        while len(all_fills) < max_fills:
+            payload = {
+                "type": "userFillsByTime",
+                "user": user_address,
+                "startTime": start_time
+            }
+
+            try:
+                response = self._make_request("/info", payload)
+            except Exception as e:
+                print(f"✗ 获取第 {page + 1} 页数据失败: {e}")
+                break
+
+            # 解析响应数据
+            if isinstance(response, list):
+                fills = response
+            else:
+                fills = response.get("fills", [])
+
+            # 没有更多数据，退出循环
+            if not fills:
+                print(f"✓ 已获取所有数据，共 {len(all_fills)} 条记录")
+                break
+
+            all_fills.extend(fills)
+            page += 1
+            print(f"  第 {page} 页: {len(fills)} 条记录，累计 {len(all_fills)} 条")
+
+            # 如果返回的数据少于2000条，说明已经是最后一页
+            if len(fills) < 2000:
+                print(f"✓ 已到达最后一页，共获取 {len(all_fills)} 条记录")
+                break
+
+            # 使用最后一条记录（最新的）的时间戳+1作为下一次的 startTime
+            last_fill_time = fills[-1].get("time")
+            if last_fill_time is None:
+                print(f"⚠️  无法获取最后一条记录的时间戳，停止翻页")
+                break
+
+            # 加1毫秒作为下一页的起始时间，避免重复获取同一条记录
+            start_time = last_fill_time + 1
+
+            # 避免API限流，每页之间延迟500ms
+            time.sleep(0.5)
+
+        # 返回不超过 max_fills 的记录
+        return all_fills[:max_fills]
     
     def get_user_state(self, user_address: str) -> Dict[str, Any]:
         """

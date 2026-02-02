@@ -1,5 +1,9 @@
 # 本地配置和临时文件
 .claude/
+.venv/
+.pytest_cache/
+__pycache__/
+
 .DS_Store
 *.swp
 *.swo
