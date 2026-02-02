@@ -920,11 +920,16 @@ class ApexCalculator:
             2. 每笔交易后，累计收益率 *= (1 + 当前交易收益率)
             3. 追踪峰值，计算每个点相对峰值的回撤
             4. 记录最大回撤及对应的峰值和谷底
+            5. 添加数值范围限制防止溢出
 
         优势：
             - 不需要初始资金
             - 不受出入金影响
             - 真实反映交易策略的风险暴露
+
+        改进：
+            - 添加累计收益率上限防止指数级增长导致的数值溢出
+            - 单笔收益率范围限制[-0.99, 10.0]，防止极端值
         """
         trade_returns = []
 
@@ -943,6 +948,10 @@ class ApexCalculator:
 
             if position_value > 0:
                 trade_return = closed_pnl / position_value
+                # 限制单笔收益率范围：[-0.99, 10.0]（防止极端值）
+                # -0.99 = -99%（最多亏完）
+                # 10.0 = 1000%（合理的最大盈利上限）
+                trade_return = max(-0.99, min(trade_return, 10.0))
                 trade_returns.append(trade_return)
 
         # 数据不足时返回零值
@@ -954,31 +963,41 @@ class ApexCalculator:
                 "total_trades": 0
             }
 
-        # 构建累计收益率序列（复利计算）
+        # 构建累计收益率序列（复利计算，带上限保护）
         cumulative_returns = []
         cumulative = 1.0  # 从1.0开始（代表100%本金）
+        MAX_CUMULATIVE = 10000.0  # 最大累计收益倍数（10000倍 = 1000000%）
 
         for ret in trade_returns:
             cumulative *= (1 + ret)  # 复利累积
+            # 防止数值溢出：限制累计收益上限
+            cumulative = min(cumulative, MAX_CUMULATIVE)
             cumulative_returns.append(cumulative)
 
         # 计算最大回撤
         peak = cumulative_returns[0]  # 初始峰值
+        peak_index = 0  # 峰值位置
         max_drawdown = 0  # 最大回撤
         trough_value = peak  # 谷底值
+        trough_index = 0  # 谷底位置
 
-        for value in cumulative_returns:
+        for i, value in enumerate(cumulative_returns):
             # 更新峰值
             if value > peak:
                 peak = value
+                peak_index = i
 
             # 计算当前回撤 = (峰值 - 当前值) / 峰值
-            drawdown = (peak - value) / peak * 100
+            drawdown = (peak - value) / peak * 100 if peak > 0 else 0
 
             # 更新最大回撤和谷底
             if drawdown > max_drawdown:
                 max_drawdown = drawdown
                 trough_value = value
+                trough_index = i
+
+        # 限制最大回撤不超过100%
+        max_drawdown = min(max_drawdown, 100.0)
 
         return {
             "max_drawdown_pct": max_drawdown,

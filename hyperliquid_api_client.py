@@ -150,7 +150,8 @@ class HyperliquidAPIClient:
             payload = {
                 "type": "userFillsByTime",
                 "user": user_address,
-                "startTime": start_time
+                "startTime": start_time,
+                "aggregateByTime": True,
             }
 
             try:

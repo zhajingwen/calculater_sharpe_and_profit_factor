@@ -35,7 +35,7 @@ def get_user_fills(user_address):
         start_time = max_time + 1
     return fills
 
-def get_historical_positions(user_address):
+def get_historical_positions(user_address, debug=False):
     fills = get_user_fills(user_address)
     # Filter out coins matching @\d+
     fills = [f for f in fills if not re.match(r'^@\d+$', f['coin'])]
@@ -47,6 +47,10 @@ def get_historical_positions(user_address):
         coin = f['coin']
         groups.setdefault(coin, []).append(f)
     historical = []
+
+    close_position_count = 0  # 统计平仓操作
+    full_close_count = 0      # 统计完全平仓
+
     for group in groups.values():
         t = []
         s = None
@@ -63,6 +67,7 @@ def get_historical_positions(user_address):
             n = px * i if sz > i else px * sz
             dir_ = a['dir']
             side = get_side(dir_)
+
             if is_open(dir_):
                 if s:
                     s['buyValue'] += px * sz
@@ -88,7 +93,24 @@ def get_historical_positions(user_address):
                 s['totalFees'] += fee
                 s['closedPnl'] += closed_pnl
                 s['positionValue'] += n
-                if sz >= i:
+
+                close_position_count += 1
+
+                # 修复逻辑：检查平仓后的剩余仓位是否接近0
+                # 而不是检查平仓大小是否大于等于交易前仓位
+                remaining_position = abs(start_position - sz)  # 计算剩余仓位
+                is_full_close = remaining_position < 0.01      # 剩余仓位 < 0.01 视为完全平仓
+
+                if debug and close_position_count <= 10:
+                    print(f"  平仓 #{close_position_count}: {a['coin']}")
+                    print(f"    交易前仓位: {start_position}")
+                    print(f"    平仓大小: {sz}")
+                    print(f"    剩余仓位: {remaining_position}")
+                    print(f"    是否完全平仓: {is_full_close}")
+                    print()
+
+                if is_full_close:
+                    full_close_count += 1
                     s['closeTime'] = a['time']
                     pnl = s['closedPnl'] - s['totalFees']
                     roi = (pnl * 100) / s['positionValue'] if s['positionValue'] != 0 else 0.0
@@ -102,6 +124,12 @@ def get_historical_positions(user_address):
                     t.append(pos)
                     s = None
         historical.extend(t)
+
+    if debug:
+        print(f"\n统计信息:")
+        print(f"  总平仓操作数: {close_position_count}")
+        print(f"  完全平仓数: {full_close_count}")
+
     return historical
 
 def calculate_profit_factor_and_sharpe(historical_positions):
@@ -134,7 +162,32 @@ def calculate_profit_factor_and_sharpe(historical_positions):
 
 if __name__ == "__main__":
     user_address = "0x7717a7a245d9f950e586822b8c9b46863ed7bd7e"
-    historical = get_historical_positions(user_address)
+
+    # 添加调试信息
+    print("获取交易数据...")
+    fills = get_user_fills(user_address)
+    print(f"总共获取到 {len(fills)} 条交易记录")
+
+    # 过滤后的数据
+    fills_filtered = [f for f in fills if not re.match(r'^@\d+$', f['coin'])]
+    print(f"过滤后剩余 {len(fills_filtered)} 条交易记录")
+
+    if fills_filtered:
+        print(f"\n前3条交易示例:")
+        for i, f in enumerate(fills_filtered[:3]):
+            print(f"  {i+1}. {f['coin']} | dir: {f['dir']} | sz: {f['sz']} | startPosition: {f['startPosition']}")
+
+    print("\n计算历史仓位...")
+    print("\n=== 前10个平仓操作详情 ===")
+    historical = get_historical_positions(user_address, debug=True)
+    print(f"\n识别到 {len(historical)} 个完整的交易周期")
+
+    if historical:
+        print(f"\n前3个交易周期示例:")
+        for i, pos in enumerate(historical[:3]):
+            print(f"  {i+1}. {pos['coin']} | PnL: {pos['pnl']:.2f} | ROI: {pos['roi']:.2f}%")
+
     pf, sharpe = calculate_profit_factor_and_sharpe(historical)
+    print(f"\n最终结果:")
     print(f"Profit Factor: {pf}")
     print(f"Sharpe Ratio: {sharpe}")

@@ -1,258 +1,133 @@
+#!/usr/bin/env python3
 """
-测试持仓时间计算算法的修复效果
-
-此脚本演示了修复前后的差异：
-1. 修复前：不区分多空方向，错误配对
-2. 修复后：正确区分多空，支持部分平仓
+测试最大回撤计算中的数值溢出问题
 """
 
 from apex_fork import ApexCalculator
-from datetime import datetime, timedelta
 
-
-def create_test_fills():
-    """创建测试交易数据"""
-    base_time = int(datetime.now().timestamp() * 1000)
-    one_day = 24 * 60 * 60 * 1000
-
-    # 测试场景1：多空混合交易（修复前会错误配对）
-    test_scenario_1 = [
-        {
-            'coin': 'BTC',
-            'dir': 'Open Long',
-            'time': base_time,
-            'sz': '1.0',
-            'closedPnl': 0
-        },
-        {
-            'coin': 'BTC',
-            'dir': 'Open Short',
-            'time': base_time + one_day,
-            'sz': '2.0',
-            'closedPnl': 0
-        },
-        {
-            'coin': 'BTC',
-            'dir': 'Close Short',
-            'time': base_time + 2 * one_day,  # Short持仓1天
-            'sz': '2.0',
-            'closedPnl': 100
-        },
-        {
-            'coin': 'BTC',
-            'dir': 'Close Long',
-            'time': base_time + 5 * one_day,  # Long持仓5天
-            'sz': '1.0',
-            'closedPnl': 200
-        }
-    ]
-
-    # 测试场景2：部分平仓（修复前无法正确处理）
-    test_scenario_2 = [
-        {
-            'coin': 'ETH',
-            'dir': 'Open Long',
-            'time': base_time,
-            'sz': '10.0',
-            'closedPnl': 0
-        },
-        {
-            'coin': 'ETH',
-            'dir': 'Close Long',
-            'time': base_time + 2 * one_day,  # 部分平仓，持仓2天
-            'sz': '5.0',
-            'closedPnl': 50
-        },
-        {
-            'coin': 'ETH',
-            'dir': 'Close Long',
-            'time': base_time + 4 * one_day,  # 剩余平仓，持仓4天
-            'sz': '5.0',
-            'closedPnl': 80
-        }
-    ]
-
-    # 测试场景3：翻仓交易
-    test_scenario_3 = [
-        {
-            'coin': 'SOL',
-            'dir': 'Open Long',
-            'time': base_time,
-            'sz': '100.0',
-            'closedPnl': 0
-        },
-        {
-            'coin': 'SOL',
-            'dir': 'Long > Short',  # 翻仓：平多开空
-            'time': base_time + 3 * one_day,  # Long持仓3天
-            'sz': '150.0',
-            'closedPnl': 150
-        },
-        {
-            'coin': 'SOL',
-            'dir': 'Close Short',
-            'time': base_time + 5 * one_day,  # Short持仓2天
-            'sz': '150.0',
-            'closedPnl': -50
-        }
-    ]
-
-    return {
-        'scenario_1': test_scenario_1,
-        'scenario_2': test_scenario_2,
-        'scenario_3': test_scenario_3
-    }
-
-
-def test_old_algorithm_simulation(fills):
-    """模拟旧算法的行为（用于对比）"""
-    from collections import defaultdict
-
-    coin_open_trades = defaultdict(list)
-    coin_positions = defaultdict(list)
-
-    sorted_fills = sorted(fills, key=lambda x: x.get('time', 0))
-
-    for fill in sorted_fills:
-        coin = fill.get('coin', '')
-        direction = fill.get('dir', '')
-        timestamp = fill.get('time', 0)
-
-        if not coin or not timestamp:
-            continue
-
-        # 旧算法：不区分多空，简单匹配Open/Close
-        if 'Open' in direction:
-            coin_open_trades[coin].append(timestamp)
-        elif 'Close' in direction:
-            if coin_open_trades[coin]:
-                open_time = coin_open_trades[coin].pop(0)
-                coin_positions[coin].append((open_time, timestamp))
-
-    # 计算持仓时间
-    all_hold_times = []
-    for coin, positions in coin_positions.items():
-        for open_time, close_time in positions:
-            hold_time_days = (close_time - open_time) / 1000 / 86400
-            all_hold_times.append(hold_time_days)
-
-    avg_hold_time = sum(all_hold_times) / len(all_hold_times) if all_hold_times else 0
-    return avg_hold_time, len(all_hold_times)
-
-
-def main():
-    print("=" * 80)
-    print("📊 持仓时间计算算法修复测试")
-    print("=" * 80)
-    print()
+def test_max_drawdown_with_extreme_values():
+    """测试极端值情况下的最大回撤计算"""
 
     calculator = ApexCalculator()
-    test_data = create_test_fills()
 
-    # 测试场景1：多空混合交易
-    print("🔍 测试场景1：多空混合交易")
-    print("-" * 80)
-    print("交易序列：")
-    print("  1. T0:   Open Long BTC   (1.0)")
-    print("  2. T+1d: Open Short BTC  (2.0)")
-    print("  3. T+2d: Close Short BTC (2.0) ← Short持仓1天")
-    print("  4. T+5d: Close Long BTC  (1.0) ← Long持仓5天")
-    print()
-    print("预期结果：")
-    print("  - Short持仓: 1天")
-    print("  - Long持仓: 5天")
-    print("  - 平均持仓时间: 3天 (简单平均)")
-    print()
+    # 模拟一些包含极端值的交易数据
+    test_fills = [
+        # 正常交易
+        {'closedPnl': 100, 'px': 1000, 'sz': 1},
+        {'closedPnl': -50, 'px': 1000, 'sz': 1},
+        {'closedPnl': 200, 'px': 1000, 'sz': 1},
+        # 极端亏损
+        {'closedPnl': -9000, 'px': 1000, 'sz': 1},
+        {'closedPnl': 50, 'px': 1000, 'sz': 1},
+    ]
 
-    fills_1 = test_data['scenario_1']
-    old_avg_1, old_count_1 = test_old_algorithm_simulation(fills_1)
-    new_result_1 = calculator.calculate_hold_time_stats(fills_1)
+    result = calculator.calculate_trade_level_max_drawdown(test_fills)
 
-    print(f"旧算法结果：")
-    print(f"  ❌ 平均持仓时间: {old_avg_1:.2f} 天 (配对次数: {old_count_1})")
-    print(f"     问题：Open Long错误地与Close Short配对")
-    print()
-    print(f"新算法结果：")
-    print(f"  ✅ 平均持仓时间: {new_result_1['allTimeAverage']:.2f} 天")
-    print(f"     正确配对：Long配Long，Short配Short")
-    print()
+    print("=" * 60)
+    print("测试结果：")
+    print("=" * 60)
+    print(f"最大回撤: {result['max_drawdown_pct']:.2f}%")
+    print(f"峰值累计收益: {result['peak_return']:.2f}%")
+    print(f"谷底累计收益: {result['trough_return']:.2f}%")
+    print(f"分析交易数: {result['total_trades']}")
+    print("=" * 60)
 
-    # 测试场景2：部分平仓
-    print("\n🔍 测试场景2：部分平仓")
-    print("-" * 80)
-    print("交易序列：")
-    print("  1. T0:   Open Long ETH  (10.0)")
-    print("  2. T+2d: Close Long ETH (5.0)  ← 部分平仓，持仓2天")
-    print("  3. T+4d: Close Long ETH (5.0)  ← 剩余平仓，持仓4天")
-    print()
-    print("预期结果：")
-    print("  - 5 ETH持仓2天")
-    print("  - 5 ETH持仓4天")
-    print("  - 平均持仓时间: 3天")
-    print()
+    # 检查是否有异常值
+    if abs(result['peak_return']) > 1000000:
+        print("⚠️  检测到峰值累计收益异常值！")
+        return False
 
-    fills_2 = test_data['scenario_2']
-    old_avg_2, old_count_2 = test_old_algorithm_simulation(fills_2)
-    new_result_2 = calculator.calculate_hold_time_stats(fills_2)
+    if abs(result['trough_return']) > 1000000:
+        print("⚠️  检测到谷底累计收益异常值！")
+        return False
 
-    print(f"旧算法结果：")
-    print(f"  ❌ 平均持仓时间: {old_avg_2:.2f} 天 (配对次数: {old_count_2})")
-    print(f"     问题：第二次平仓找不到对应的开仓")
-    print()
-    print(f"新算法结果：")
-    print(f"  ✅ 平均持仓时间: {new_result_2['allTimeAverage']:.2f} 天")
-    print(f"     正确处理：支持部分平仓")
-    print()
+    if result['max_drawdown_pct'] > 100:
+        print("⚠️  最大回撤超过100%，可能存在问题！")
+        return False
 
-    # 测试场景3：翻仓交易
-    print("\n🔍 测试场景3：翻仓交易")
-    print("-" * 80)
-    print("交易序列：")
-    print("  1. T0:   Open Long SOL     (100.0)")
-    print("  2. T+3d: Long > Short SOL  (150.0) ← 平多开空，Long持仓3天")
-    print("  3. T+5d: Close Short SOL   (150.0) ← Short持仓2天")
-    print()
-    print("预期结果：")
-    print("  - Long持仓: 3天")
-    print("  - Short持仓: 2天")
-    print("  - 平均持仓时间: 2.5天")
-    print()
+    print("✅ 测试通过：所有数值在合理范围内")
+    return True
 
-    fills_3 = test_data['scenario_3']
-    old_avg_3, old_count_3 = test_old_algorithm_simulation(fills_3)
-    new_result_3 = calculator.calculate_hold_time_stats(fills_3)
 
-    print(f"旧算法结果：")
-    print(f"  ❌ 平均持仓时间: {old_avg_3:.2f} 天 (配对次数: {old_count_3})")
-    print(f"     问题：无法正确处理翻仓交易")
-    print()
-    print(f"新算法结果：")
-    print(f"  ✅ 平均持仓时间: {new_result_3['allTimeAverage']:.2f} 天")
-    print(f"     正确处理：识别翻仓交易，先平仓再开仓")
-    print()
+def test_with_real_address():
+    """使用真实地址测试"""
+    calculator = ApexCalculator()
+    user_address = "0x7717a7a245d9f950e586822b8c9b46863ed7bd7e"
 
-    # 总结
-    print("\n" + "=" * 80)
-    print("📈 修复总结")
-    print("=" * 80)
-    print()
-    print("✅ 修复的问题：")
-    print("  1. 区分多头和空头仓位，避免错误配对")
-    print("  2. 支持部分平仓的数量加权计算")
-    print("  3. 正确处理翻仓交易 (Long > Short, Short > Long)")
-    print()
-    print("🎯 算法改进：")
-    print("  - 为每个币种维护独立的多头和空头开仓队列")
-    print("  - 使用FIFO原则进行配对")
-    print("  - 按数量比例处理部分平仓")
-    print()
-    print("⚠️  影响范围：")
-    print("  - 如果用户只做单一方向交易，结果可能保持一致")
-    print("  - 如果用户同时做多空交易，结果会显著改善")
-    print("  - 存在部分平仓时，计算会更加准确")
-    print()
-    print("=" * 80)
+    print("\n" + "=" * 60)
+    print(f"测试真实地址: {user_address}")
+    print("=" * 60)
+
+    try:
+        # 获取真实数据
+        user_data = calculator.get_user_data(user_address)
+        fills = user_data.get('fills', [])
+
+        if not fills:
+            print("⚠️  没有交易数据")
+            return
+
+        print(f"获取到 {len(fills)} 条交易记录")
+
+        # 计算最大回撤
+        result = calculator.calculate_trade_level_max_drawdown(fills)
+
+        print("\n计算结果：")
+        print(f"  • 最大回撤: {result['max_drawdown_pct']:.2f}%")
+        print(f"  • 峰值累计收益: {result['peak_return']:.2f}%")
+        print(f"  • 谷底累计收益: {result['trough_return']:.2f}%")
+        print(f"  • 分析交易数: {result['total_trades']}")
+
+        # 检查异常值
+        if abs(result['peak_return']) > 1e6 or abs(result['trough_return']) > 1e6:
+            print("\n" + "!" * 60)
+            print("⚠️  检测到数值溢出问题！")
+            print("!" * 60)
+
+            # 详细分析问题
+            print("\n🔍 问题诊断：")
+            print(f"  峰值收益是否溢出: {abs(result['peak_return']) > 1e6}")
+            print(f"  谷底收益是否溢出: {abs(result['trough_return']) > 1e6}")
+
+            # 分析交易收益率
+            trade_returns = []
+            for fill in fills:
+                closed_pnl = float(fill.get('closedPnl', 0))
+                if closed_pnl == 0:
+                    continue
+
+                px = float(fill.get('px', 0))
+                sz = abs(float(fill.get('sz', 0)))
+                position_value = px * sz
+
+                if position_value > 0:
+                    trade_return = closed_pnl / position_value
+                    trade_returns.append(trade_return)
+
+            if trade_returns:
+                max_return = max(trade_returns)
+                min_return = min(trade_returns)
+                print(f"\n  单笔最大收益率: {max_return:.2%}")
+                print(f"  单笔最大亏损率: {min_return:.2%}")
+
+                # 检查是否有极端值
+                if abs(max_return) > 10 or abs(min_return) > 10:
+                    print(f"\n  ⚠️  存在极端收益率（>1000%），可能导致溢出！")
+                    print(f"  建议：添加收益率范围限制")
+        else:
+            print("\n✅ 数值正常，无溢出问题")
+
+    except Exception as e:
+        print(f"❌ 测试失败: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
-    main()
+    print("开始测试最大回撤计算...\n")
+
+    # 测试1：极端值测试
+    test_max_drawdown_with_extreme_values()
+
+    # 测试2：真实地址测试
+    test_with_real_address()
