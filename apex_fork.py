@@ -429,10 +429,10 @@ class ApexCalculator:
     
     def calculate_hold_time_stats(self, fills: List[Dict]) -> Dict[str, float]:
         """
-        计算平均持仓时间统计（通过配对开仓/平仓交易）
+        计算平均持仓时间统计（改进版：区分多空方向，支持部分平仓）
 
         参数：
-            fills: 成交记录列表，包含'time'、'dir'和'coin'字段
+            fills: 成交记录列表，包含'time'、'dir'、'coin'和'sz'字段
 
         返回：
             字典，包含不同时间段的平均持仓时间（天数）：
@@ -441,10 +441,17 @@ class ApexCalculator:
             - last30DaysAverage: 最近30天平均持仓时间
             - allTimeAverage: 全部时间平均持仓时间
 
+        算法改进：
+            1. 区分多头(Long)和空头(Short)仓位，分别配对
+            2. 支持部分平仓的加权计算
+            3. 使用FIFO原则进行配对
+            4. 正确处理翻仓交易(Long > Short, Short > Long)
+
         算法说明：
-            1. 按币种对开仓和平仓交易进行配对
-            2. 计算每对交易的持仓时长
-            3. 按时间段统计平均值
+            1. 为每个币种维护独立的多头和空头开仓队列
+            2. 平仓时从对应方向的队列中按FIFO原则匹配
+            3. 支持部分平仓：按数量比例匹配开仓记录
+            4. 计算每对交易的持仓时长并按时间段统计
         """
         if not fills:
             return {
@@ -462,30 +469,90 @@ class ApexCalculator:
         week_ago = today_start - timedelta(days=7)
         month_ago = today_start - timedelta(days=30)
 
-        # 按币种分组并配对开仓/平仓交易
-        coin_positions = defaultdict(list)  # {币种: [(开仓时间, 平仓时间), ...]}
-        coin_open_trades = defaultdict(list)  # {币种: [开仓时间1, 开仓时间2, ...]}
+        # 为每个币种维护多头和空头的开仓队列
+        # 队列中存储 [开仓时间, 剩余数量]
+        long_open_positions = defaultdict(list)
+        short_open_positions = defaultdict(list)
+
+        # 存储所有已配对的持仓记录 (开仓时间, 平仓时间, 持仓数量)
+        completed_positions = []
 
         # 按时间排序
         sorted_fills = sorted(fills, key=lambda x: x.get('time', 0))
 
         for fill in sorted_fills:
             coin = fill.get('coin', '')
-            direction = fill.get('dir', '')
+            direction = fill.get('dir', '').strip()
             timestamp = fill.get('time', 0)
+            size = abs(float(fill.get('sz', 0)))
 
-            if not coin or not timestamp:
+            if not coin or not timestamp or size == 0:
                 continue
 
-            # 识别开仓交易
-            if 'Open' in direction:
-                coin_open_trades[coin].append(timestamp)
+            # 标准化方向字符串（不区分大小写）
+            dir_lower = direction.lower()
 
-            # 识别平仓交易并配对
-            elif 'Close' in direction:
-                if coin_open_trades[coin]:
-                    open_time = coin_open_trades[coin].pop(0)  # FIFO配对
-                    coin_positions[coin].append((open_time, timestamp))
+            # 处理开多仓交易
+            if 'open long' in dir_lower and 'short' not in dir_lower:
+                long_open_positions[coin].append([timestamp, size])
+
+            # 处理开空仓交易
+            elif 'open short' in dir_lower and 'long' not in dir_lower:
+                short_open_positions[coin].append([timestamp, size])
+
+            # 处理平多仓交易（支持部分平仓）
+            elif 'close long' in dir_lower and 'short' not in dir_lower:
+                remaining_size = size
+
+                while remaining_size > 1e-9 and long_open_positions[coin]:
+                    open_time, open_size = long_open_positions[coin][0]
+
+                    if open_size <= remaining_size:
+                        # 完全平掉这笔开仓
+                        completed_positions.append((open_time, timestamp, open_size))
+                        remaining_size -= open_size
+                        long_open_positions[coin].pop(0)
+                    else:
+                        # 部分平仓
+                        completed_positions.append((open_time, timestamp, remaining_size))
+                        long_open_positions[coin][0][1] -= remaining_size
+                        remaining_size = 0
+
+            # 处理平空仓交易（支持部分平仓）
+            elif 'close short' in dir_lower and 'long' not in dir_lower:
+                remaining_size = size
+
+                while remaining_size > 1e-9 and short_open_positions[coin]:
+                    open_time, open_size = short_open_positions[coin][0]
+
+                    if open_size <= remaining_size:
+                        # 完全平掉这笔开仓
+                        completed_positions.append((open_time, timestamp, open_size))
+                        remaining_size -= open_size
+                        short_open_positions[coin].pop(0)
+                    else:
+                        # 部分平仓
+                        completed_positions.append((open_time, timestamp, remaining_size))
+                        short_open_positions[coin][0][1] -= remaining_size
+                        remaining_size = 0
+
+            # 处理翻仓交易：从空翻多 (Short > Long)
+            elif 'short > long' in dir_lower or 'short>long' in dir_lower:
+                # 先平掉所有空头仓位
+                while short_open_positions[coin]:
+                    open_time, open_size = short_open_positions[coin].pop(0)
+                    completed_positions.append((open_time, timestamp, open_size))
+                # 然后作为开多仓处理
+                long_open_positions[coin].append([timestamp, size])
+
+            # 处理翻仓交易：从多翻空 (Long > Short)
+            elif 'long > short' in dir_lower or 'long>short' in dir_lower:
+                # 先平掉所有多头仓位
+                while long_open_positions[coin]:
+                    open_time, open_size = long_open_positions[coin].pop(0)
+                    completed_positions.append((open_time, timestamp, open_size))
+                # 然后作为开空仓处理
+                short_open_positions[coin].append([timestamp, size])
 
         # 计算所有配对交易的持仓时间
         today_hold_times = []
@@ -493,23 +560,22 @@ class ApexCalculator:
         month_hold_times = []
         all_hold_times = []
 
-        for coin, positions in coin_positions.items():
-            for open_time, close_time in positions:
-                open_dt = datetime.fromtimestamp(open_time / 1000)
-                close_dt = datetime.fromtimestamp(close_time / 1000)
+        for open_time, close_time, position_size in completed_positions:
+            open_dt = datetime.fromtimestamp(open_time / 1000)
+            close_dt = datetime.fromtimestamp(close_time / 1000)
 
-                hold_time_days = (close_dt - open_dt).total_seconds() / 86400
-                all_hold_times.append(hold_time_days)
+            hold_time_days = (close_dt - open_dt).total_seconds() / 86400
+            all_hold_times.append(hold_time_days)
 
-                # 按时间段分类
-                if close_dt >= today_start:
-                    today_hold_times.append(hold_time_days)
+            # 按时间段分类
+            if close_dt >= today_start:
+                today_hold_times.append(hold_time_days)
 
-                if close_dt >= week_ago:
-                    week_hold_times.append(hold_time_days)
+            if close_dt >= week_ago:
+                week_hold_times.append(hold_time_days)
 
-                if close_dt >= month_ago:
-                    month_hold_times.append(hold_time_days)
+            if close_dt >= month_ago:
+                month_hold_times.append(hold_time_days)
 
         return {
             "todayCount": sum(today_hold_times) / len(today_hold_times) if today_hold_times else 0,
