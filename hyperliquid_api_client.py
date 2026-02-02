@@ -119,14 +119,13 @@ class HyperliquidAPIClient:
         # 如果所有重试都失败
         raise Exception(f"API请求失败: 超过最大重试次数")
     
-    def get_user_fills(self, user_address: str, max_fills: int = 10000) -> List[Dict[str, Any]]:
+    def get_user_fills(self, user_address: str, max_fills: int = 90000) -> List[Dict[str, Any]]:
         """
         获取用户成交记录（支持翻页获取全量数据）
 
         根据 Hyperliquid API 规则：
         - 使用 userFillsByTime 端点支持时间范围查询
         - 每次请求最多返回 2000 条记录
-        - 只能访问最近的 10000 条记录
         - API 返回顺序：从旧到新（按时间升序）
         - 通过 startTime 参数进行翻页（向更新的时间前进）
 
