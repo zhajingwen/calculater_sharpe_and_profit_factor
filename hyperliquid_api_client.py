@@ -376,55 +376,55 @@ class HyperliquidAPIClient:
         return True
 
 
-def main():
-    """
-    测试API客户端并展示详细的投资组合分析
-    """
-    client = HyperliquidAPIClient()
-    analyzer = PortfolioAnalyzer()
+# def main():
+#     """
+#     测试API客户端并展示详细的投资组合分析
+#     """
+#     client = HyperliquidAPIClient()
+#     analyzer = PortfolioAnalyzer()
 
-    # 测试地址（请替换为真实地址）
-    test_address = "0x3ca32dd3666ed1b69e86b86b420b058caa8c1aaf"
+#     # 测试地址（请替换为真实地址）
+#     test_address = "0x3ca32dd3666ed1b69e86b86b420b058caa8c1aaf"
 
-    if not client.validate_user_address(test_address):
-        print(f"❌ 测试地址格式无效: {test_address}")
-        return
+#     if not client.validate_user_address(test_address):
+#         print(f"❌ 测试地址格式无效: {test_address}")
+#         return
 
-    print(f"✅ 测试地址格式有效: {test_address}\n")
+#     print(f"✅ 测试地址格式有效: {test_address}\n")
 
-    try:
-        # 获取用户状态数据
-        print("📡 正在获取用户数据...")
-        user_state = client.get_user_state(user_address=test_address)
+#     try:
+#         # 获取用户状态数据
+#         print("📡 正在获取用户数据...")
+#         user_state = client.get_user_state(user_address=test_address)
 
-        if not user_state:
-            print("❌ 未能获取用户数据")
-            return
+#         if not user_state:
+#             print("❌ 未能获取用户数据")
+#             return
 
-        # 解析数据
-        print("📊 正在解析数据...\n")
-        parsed_data = analyzer.parse_user_state(user_state)
+#         # 解析数据
+#         print("📊 正在解析数据...\n")
+#         parsed_data = analyzer.parse_user_state(user_state)
 
-        # 计算统计数据
-        stats = analyzer.calculate_statistics(parsed_data)
+#         # 计算统计数据
+#         stats = analyzer.calculate_statistics(parsed_data)
 
-        # 格式化输出
-        output = analyzer.format_output(parsed_data, stats)
-        print(output)
+#         # 格式化输出
+#         output = analyzer.format_output(parsed_data, stats)
+#         print(output)
 
-        # 额外显示原始数据摘要
-        print("\n" + "=" * 80)
-        print("📋 原始数据摘要")
-        print("-" * 80)
-        print(f"成交记录数量: {len(client.get_user_fills(test_address))}")
-        print(f"未成交订单: {len(client.get_user_open_orders(test_address))}")
-        print("=" * 80)
+#         # 额外显示原始数据摘要
+#         print("\n" + "=" * 80)
+#         print("📋 原始数据摘要")
+#         print("-" * 80)
+#         print(f"成交记录数量: {len(client.get_user_fills(test_address))}")
+#         print(f"未成交订单: {len(client.get_user_open_orders(test_address))}")
+#         print("=" * 80)
 
-    except Exception as e:
-        print(f"❌ 测试失败: {e}")
-        import traceback
-        traceback.print_exc()
+#     except Exception as e:
+#         print(f"❌ 测试失败: {e}")
+#         import traceback
+#         traceback.print_exc()
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
