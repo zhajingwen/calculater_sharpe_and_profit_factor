@@ -119,7 +119,7 @@ class HyperliquidAPIClient:
         # 如果所有重试都失败
         raise Exception(f"API请求失败: 超过最大重试次数")
     
-    def get_user_fills(self, user_address: str, max_fills: int = 90000) -> List[Dict[str, Any]]:
+    def get_user_fills(self, user_address: str, max_fills: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         获取用户成交记录（支持翻页获取全量数据）
 
@@ -142,7 +142,11 @@ class HyperliquidAPIClient:
 
         print(f"→ 开始获取用户成交记录...")
 
-        while len(all_fills) < max_fills:
+        while True:
+
+            if max_fills is not None and len(all_fills) >= max_fills:
+                break
+            
             payload = {
                 "type": "userFillsByTime",
                 "user": user_address,
@@ -187,8 +191,7 @@ class HyperliquidAPIClient:
             # 避免API限流，每页之间延迟500ms
             time.sleep(0.5)
 
-        # 返回不超过 max_fills 的记录
-        return all_fills[:max_fills]
+        return all_fills
     
     def get_user_state(self, user_address: str) -> Dict[str, Any]:
         """
