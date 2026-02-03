@@ -859,7 +859,7 @@ class ApexCalculator:
         else:
             trading_days = 0.0
 
-        # 计算年化收益率（添加合理性检查）
+        # 计算年化收益率（始终计算，但标记可靠性）
         annualized_return = 0.0
         annualized_return_valid = True
 
@@ -867,20 +867,19 @@ class ApexCalculator:
             # 年化收益率 = ((1 + 累计收益率) ^ (365 / 交易天数) - 1) × 100%
             annual_factor = 365.0 / trading_days
 
-            # 对于交易天数较短的情况，年化收益率可能不具参考意义
-            if trading_days < 30:
-                annualized_return_valid = False
-                annualized_return = 0.0  # 不显示年化收益率
-            else:
-                try:
-                    annualized_return = (math.pow(1 + cumulative_return / 100, annual_factor) - 1) * 100
+            try:
+                annualized_return = (math.pow(1 + cumulative_return / 100, annual_factor) - 1) * 100
 
-                    # 如果年化收益率过大（>10000%），标记为不可靠
-                    if abs(annualized_return) > 10000:
-                        annualized_return_valid = False
-                except (OverflowError, ValueError):
-                    annualized_return = 0.0
+                # 对于交易天数较短的情况，标记为不可靠但仍显示计算值
+                if trading_days < 30:
                     annualized_return_valid = False
+
+                # 如果年化收益率过大（>10000%），标记为不可靠
+                if abs(annualized_return) > 10000:
+                    annualized_return_valid = False
+            except (OverflowError, ValueError):
+                annualized_return = 0.0
+                annualized_return_valid = False
 
         return {
             "cumulative_return": cumulative_return,
