@@ -121,11 +121,22 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
 ## 💵 本金与收益率
 
+### 真实本金计算（算法 2: 完整版本）
+
+| 项目 | 数值 | 说明 |
+|------|------|------|
+| **真实本金** | **${results.get('capital_info', {}).get('true_capital', 0):,.2f}** | 充值 - 提现 + 外部转入 - 外部转出 |
+| ├─ 总充值 | ${results.get('capital_info', {}).get('total_deposits', 0):,.2f} | Deposit 操作 |
+| ├─ 总提现 | -${results.get('capital_info', {}).get('total_withdrawals', 0):,.2f} | Withdraw 操作 |
+| ├─ 外部转入 Spot | +${results.get('capital_info', {}).get('external_to_spot', 0):,.2f} | 别人通过 Send 转入 |
+| └─ 外部转出 | -${results.get('capital_info', {}).get('external_out', 0):,.2f} | 通过 Send 转给别人 |
+
+> ⚠️ **注意**: 已排除 Perp ↔ Spot 内部转账（不影响总资金）
+
+### 收益率指标
+
 | 项目 | 数值 |
 |------|------|
-| **真实本金** | **${results.get('capital_info', {}).get('true_capital', 0):,.2f}** |
-| ├─ 总充值 | ${results.get('capital_info', {}).get('total_deposits', 0):,.2f} |
-| └─ 总提现 | ${results.get('capital_info', {}).get('total_withdrawals', 0):,.2f} |
 | **累计收益率** | **{results.get('return_metrics', {}).get('cumulative_return', 0):.2f}%** |
 | **年化收益率** | **{results.get('return_metrics', {}).get('annualized_return', 0):.2f}%** |
 | 净盈利 | ${results.get('return_metrics', {}).get('net_profit', 0):,.2f} |

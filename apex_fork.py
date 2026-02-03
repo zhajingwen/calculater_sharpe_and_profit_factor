@@ -735,11 +735,13 @@ class ApexCalculator:
             print(f"  → 获取账本记录...")
             ledger_records = self.api_client.get_user_ledger(user_address, start_time=0)
 
-            capital_info = self.calculate_true_capital(ledger_records)
+            capital_info = self.calculate_true_capital(user_address, ledger_records)
             results["capital_info"] = capital_info
             print(f"  ✓ 真实本金: ${capital_info['true_capital']:,.2f}")
             print(f"    - 总充值: ${capital_info['total_deposits']:,.2f}")
             print(f"    - 总提现: ${capital_info['total_withdrawals']:,.2f}")
+            print(f"    - 外部转入 Spot: ${capital_info['external_to_spot']:,.2f}")
+            print(f"    - 外部转出: ${capital_info['external_out']:,.2f}")
 
             # 指标9: 累计收益率和年化收益率 (Return Metrics)
             current_account_value = results["data_summary"].get("account_value", 0)
@@ -777,21 +779,37 @@ class ApexCalculator:
             print(f"详细错误信息:\n{traceback.format_exc()}")
             return {"error": error_msg}
 
-    def calculate_true_capital(self, ledger_records: List[Dict]) -> Dict[str, float]:
+    def calculate_true_capital(self, user_address: str, ledger_records: List[Dict]) -> Dict[str, float]:
         """
-        计算真实本金（充值 - 提现）
+        计算真实本金（算法 2: 完整版本）
+
+        计算公式:
+        true_capital = deposits - withdrawals + external_to_spot - external_out
+
+        考虑因素:
+        1. ✅ 充值和提现（deposit/withdraw）
+        2. ✅ 外部转入到 Spot（别人通过 send 转给我的）
+        3. ✅ 外部转出（我通过 send 转给别人的）
+        4. ❌ 排除内部 Perp ↔ Spot 转账（不影响总资金）
 
         参数：
+            user_address: 用户地址
             ledger_records: 账本记录列表
 
         返回：
             字典，包含：
             - total_deposits: 总充值
             - total_withdrawals: 总提现
-            - true_capital: 真实本金 (充值 - 提现)
+            - external_to_spot: 外部转入 Spot
+            - external_out: 外部转出
+            - true_capital: 真实本金
         """
         total_deposits = 0.0
         total_withdrawals = 0.0
+        external_to_spot = 0.0
+        external_out = 0.0
+
+        addr_lower = user_address.lower()
 
         for record in ledger_records:
             delta = record.get('delta', {})
@@ -801,16 +819,46 @@ class ApexCalculator:
                 # 充值
                 amount = safe_float(delta.get('usdc', 0))
                 total_deposits += amount
+
             elif delta_type == 'withdraw':
                 # 提现
                 amount = safe_float(delta.get('usdc', 0))
                 total_withdrawals += abs(amount)  # 提现可能是负数
 
-        true_capital = total_deposits - total_withdrawals
+            elif delta_type == 'send':
+                # 转账操作
+                amount = safe_float(delta.get('amount', 0))
+                user = delta.get('user', '').lower()
+                dest = delta.get('destination', '').lower()
+                source_dex = delta.get('sourceDex', '')
+                dest_dex = delta.get('destinationDex', '')
+
+                # 判断是否为内部转账（Perp ↔ Spot）
+                is_internal_transfer = (user == addr_lower and dest == addr_lower)
+
+                if is_internal_transfer:
+                    # 内部转账，不影响总资金，跳过
+                    continue
+
+                # 外部转入到 Spot
+                if user != addr_lower and dest == addr_lower and dest_dex == 'spot':
+                    external_to_spot += amount
+
+                # 外部转出
+                elif user == addr_lower and dest != addr_lower:
+                    external_out += amount
+
+        # 计算真实本金
+        true_capital = (
+            total_deposits - total_withdrawals +
+            external_to_spot - external_out
+        )
 
         return {
             "total_deposits": total_deposits,
             "total_withdrawals": total_withdrawals,
+            "external_to_spot": external_to_spot,
+            "external_out": external_out,
             "true_capital": true_capital
         }
 

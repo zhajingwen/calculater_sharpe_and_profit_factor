@@ -249,13 +249,16 @@ def display_account_info(analysis: AnalysisResults) -> None:
     print_metric("  └─ 未实现盈亏", f"${total_unrealized_pnl:,.2f}")
 
     # 本金和收益率信息
-    print("\n本金与收益率:")
+    print("\n本金与收益率 (算法2: 完整版本):")
     capital_info = raw_results.get('capital_info', {})
     return_metrics = raw_results.get('return_metrics', {})
 
     print_metric("真实本金", f"${capital_info.get('true_capital', 0):,.2f}")
     print_metric("  ├─ 总充值", f"${capital_info.get('total_deposits', 0):,.2f}")
-    print_metric("  └─ 总提现", f"${capital_info.get('total_withdrawals', 0):,.2f}")
+    print_metric("  ├─ 总提现", f"-${capital_info.get('total_withdrawals', 0):,.2f}")
+    print_metric("  ├─ 外部转入 Spot", f"+${capital_info.get('external_to_spot', 0):,.2f}")
+    print_metric("  └─ 外部转出", f"-${capital_info.get('external_out', 0):,.2f}")
+    print("\n")
     print_metric("累计收益率", f"{return_metrics.get('cumulative_return', 0):.2f}%")
     print_metric("年化收益率", f"{return_metrics.get('annualized_return', 0):.2f}%")
     print_metric("  ├─ 净盈利", f"${return_metrics.get('net_profit', 0):,.2f}")
