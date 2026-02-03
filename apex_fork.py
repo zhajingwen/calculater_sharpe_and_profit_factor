@@ -653,19 +653,6 @@ class ApexCalculator:
                 results["profit_factor"] = 0
                 print(f"  ⚠ Profit Factor: 无成交记录")
 
-            # 指标2: 夏普比率 (Sharpe Ratio) - 交易级别算法
-            if fills and len(fills) > 1:
-                sharpe_result = self.calculate_trade_level_sharpe_ratio(fills)
-                results["sharpe_ratio"] = sharpe_result["sharpe_ratio"]
-                results["annualized_sharpe"] = sharpe_result["annualized_sharpe"]
-                print(f"  ✓ Sharpe Ratio (每笔交易): {sharpe_result['sharpe_ratio']:.4f}")
-                print(f"  ✓ Sharpe Ratio (年化): {sharpe_result['annualized_sharpe']:.2f}")
-                print(f"    - 平均每笔收益率: {sharpe_result['mean_return_per_trade']*100:.2f}%")
-                print(f"    - 收益率标准差: {sharpe_result['std_dev']*100:.2f}%")
-            else:
-                results["sharpe_ratio"] = 0
-                results["annualized_sharpe"] = 0
-                print(f"  ⚠ Sharpe Ratio: 数据不足")
 
             # 指标3: 胜率统计 (Win Rate)
             if fills:
@@ -678,26 +665,7 @@ class ApexCalculator:
                 results["win_rate"] = {"winRate": 0, "bias": 50, "totalTrades": 0}
                 print(f"  ⚠ Win Rate: 无成交记录")
 
-            # 指标4: 最大回撤 (Max Drawdown) - 交易级别算法
-            if fills:
-                max_dd_result = self.calculate_trade_level_max_drawdown(fills)
-                results["max_drawdown"] = max_dd_result["max_drawdown_pct"]
-                results["max_drawdown_detail"] = max_dd_result
-                print(f"  ✓ Max Drawdown: {max_dd_result['max_drawdown_pct']:.2f}%")
-                print(f"    - 峰值收益率: {max_dd_result['peak_return']:.2f}%")
-                print(f"    - 谷底收益率: {max_dd_result['trough_return']:.2f}%")
-                print(f"    - 分析交易数: {max_dd_result['total_trades']}")
-            else:
-                results["max_drawdown"] = 0
-                results["max_drawdown_detail"] = {
-                    "max_drawdown_pct": 0,
-                    "peak_return": 0,
-                    "trough_return": 0,
-                    "total_trades": 0
-                }
-                print(f"  ⚠ Max Drawdown: 无成交记录")
-
-            # 指标5: 持仓时间统计 (Hold Time Stats)
+            # 指标4: 持仓时间统计 (Hold Time Stats)
             if fills:
                 hold_stats = self.calculate_hold_time_stats(fills)
                 results["hold_time_stats"] = hold_stats
@@ -765,6 +733,50 @@ class ApexCalculator:
             print(f"  ✓ 年化收益率: {return_metrics['annualized_return']:.2f}%")
             print(f"    - 净盈利: ${return_metrics['net_profit']:,.2f}")
             print(f"    - 交易天数: {return_metrics['trading_days']:.1f} 天")
+
+            # 指标10: 基于真实本金的 Sharpe Ratio（推荐方法）
+            if fills and len(fills) > 1:
+                print(f"\n📈 计算 Sharpe Ratio（基于真实本金）:")
+                sharpe_on_capital = self.calculate_sharpe_ratio_on_capital(
+                    fills=fills,
+                    true_capital=capital_info['true_capital']
+                )
+                results["sharpe_on_capital"] = sharpe_on_capital
+                print(f"  ✓ Sharpe Ratio (每笔交易): {sharpe_on_capital['sharpe_ratio']:.4f}")
+                print(f"  ✓ Sharpe Ratio (年化): {sharpe_on_capital['annualized_sharpe']:.2f}")
+                print(f"    - 平均每笔收益率: {sharpe_on_capital['mean_return_per_trade']*100:.4f}%")
+                print(f"    - 收益率标准差: {sharpe_on_capital['std_dev']*100:.4f}%")
+                print(f"    - 分析交易数: {sharpe_on_capital['total_trades']}")
+            else:
+                results["sharpe_on_capital"] = {
+                    "sharpe_ratio": 0,
+                    "annualized_sharpe": 0,
+                    "mean_return_per_trade": 0,
+                    "std_dev": 0,
+                    "total_trades": 0
+                }
+                print(f"  ⚠ Sharpe Ratio (基于真实本金): 数据不足")
+
+            # 指标11: 基于真实本金的 Max Drawdown（推荐方法）
+            if fills and len(fills) > 1:
+                print(f"\n📉 计算 Max Drawdown（基于真实本金）:")
+                max_dd_on_capital = self.calculate_max_drawdown_on_capital(
+                    fills=fills,
+                    true_capital=capital_info['true_capital']
+                )
+                results["max_drawdown_on_capital"] = max_dd_on_capital
+                print(f"  ✓ 最大回撤: {max_dd_on_capital['max_drawdown_pct']:.2f}%")
+                print(f"    - 峰值累计收益率: {max_dd_on_capital['peak_return']:.2f}%")
+                print(f"    - 谷底累计收益率: {max_dd_on_capital['trough_return']:.2f}%")
+                print(f"    - 分析交易数: {max_dd_on_capital['total_trades']}")
+            else:
+                results["max_drawdown_on_capital"] = {
+                    "max_drawdown_pct": 0,
+                    "peak_return": 0,
+                    "trough_return": 0,
+                    "total_trades": 0
+                }
+                print(f"  ⚠ Max Drawdown (基于真实本金): 数据不足")
 
             print(f"\n{'='*60}")
             print("✅ 分析完成!")
@@ -969,35 +981,47 @@ class ApexCalculator:
             "position_bias": bias
         }
 
-    def calculate_trade_level_sharpe_ratio(self, fills: List[Dict], risk_free_rate: float = 0.03) -> Dict[str, float]:
+    def calculate_sharpe_ratio_on_capital(self, fills: List[Dict], true_capital: float,
+                                          risk_free_rate: float = 0.03) -> Dict[str, float]:
         """
-        计算交易级别的夏普比率（不受出入金影响）
+        计算基于真实本金的夏普比率（方案 1: 推荐方法）
 
-        该方法基于单笔交易收益率计算夏普比率，完全独立于账户价值变化
+        该方法基于真实本金计算夏普比率,不受杠杆影响
 
         参数：
             fills: 成交记录列表
+            true_capital: 真实本金（充值 - 提现 + 外部转入 - 外部转出）
             risk_free_rate: 无风险利率（年化，默认3%）
 
         返回：
             字典，包含：
             - sharpe_ratio: 每笔交易的夏普比率
             - annualized_sharpe: 年化夏普比率
-            - mean_return_per_trade: 平均每笔收益率
+            - mean_return_per_trade: 平均每笔收益率（相对本金）
             - std_dev: 收益率标准差
             - total_trades: 分析的交易数量
 
         算法说明：
-            1. 对每笔有PnL的交易，计算收益率 = PnL / Position_Value
+            1. 对每笔有PnL的交易，计算收益率 = PnL / True_Capital
             2. 基于收益率序列计算均值和标准差
             3. Sharpe = (mean_return - rf) / std_dev
             4. 年化Sharpe = 每笔交易Sharpe × sqrt(年交易次数)
 
         优势：
-            - 完全不依赖账户价值
-            - 不受出入金影响
-            - 真实反映交易策略的风险收益比
+            - ✅ 不受杠杆影响，真实反映风险收益比
+            - ✅ 与累计收益率计算逻辑一致
+            - ✅ 不受出入金影响（使用校正后的本金）
+            - ✅ 反映真实的资金使用效率
         """
+        if true_capital <= 0:
+            return {
+                "sharpe_ratio": 0,
+                "annualized_sharpe": 0,
+                "mean_return_per_trade": 0,
+                "std_dev": 0,
+                "total_trades": 0
+            }
+
         trade_returns = []
 
         # 遍历所有成交记录，提取平仓交易的收益率
@@ -1008,15 +1032,9 @@ class ApexCalculator:
             if closed_pnl == 0:
                 continue
 
-            # 计算仓位价值 = 价格 × 数量
-            px = float(fill.get('px', 0))
-            sz = abs(float(fill.get('sz', 0)))
-            position_value = px * sz
-
-            if position_value > 0:
-                # 计算交易收益率 = PnL / 仓位价值
-                trade_return = closed_pnl / position_value
-                trade_returns.append(trade_return)
+            # 计算交易收益率 = PnL / 真实本金
+            trade_return = closed_pnl / true_capital
+            trade_returns.append(trade_return)
 
         # 数据不足时返回零值
         if len(trade_returns) < 2:
@@ -1078,14 +1096,15 @@ class ApexCalculator:
             "total_trades": len(trade_returns)
         }
 
-    def calculate_trade_level_max_drawdown(self, fills: List[Dict]) -> Dict[str, float]:
+    def calculate_max_drawdown_on_capital(self, fills: List[Dict], true_capital: float) -> Dict[str, float]:
         """
-        计算交易级别的最大回撤（不受出入金影响）
+        基于真实本金计算最大回撤（推荐方法）
 
-        该方法基于累计收益率计算最大回撤，完全独立于账户价值变化
+        关键改进：使用真实本金而非持仓价值计算收益率，完全不受杠杆影响
 
         参数：
             fills: 成交记录列表
+            true_capital: 真实本金（充值 - 提现 + 外部转入 - 外部转出）
 
         返回：
             字典，包含：
@@ -1095,21 +1114,31 @@ class ApexCalculator:
             - total_trades: 分析的交易数量
 
         算法说明：
-            1. 构建累计收益率序列（不是累计PnL）
-            2. 每笔交易后，累计收益率 *= (1 + 当前交易收益率)
+            1. 每笔交易收益率 = closedPnL / true_capital（不是 position_value）
+            2. 构建累计收益率序列（复利计算）
             3. 追踪峰值，计算每个点相对峰值的回撤
             4. 记录最大回撤及对应的峰值和谷底
-            5. 添加数值范围限制防止溢出
 
         优势：
-            - 不需要初始资金
-            - 不受出入金影响
-            - 真实反映交易策略的风险暴露
+            - ✅ 不受杠杆影响，真实反映风险
+            - ✅ 与 Sharpe Ratio 计算逻辑一致
+            - ✅ 不受出入金影响
+            - ✅ 反映真实的资金使用效率
 
-        改进：
-            - 添加累计收益率上限防止指数级增长导致的数值溢出
-            - 单笔收益率范围限制[-0.99, 10.0]，防止极端值
+        为什么使用真实本金？
+            - 10倍杠杆：投入 $100，持仓价值 $1000
+            - 亏损 $50：
+              * 旧算法：-50/1000 = -5%（❌ 严重低估）
+              * 新算法：-50/100 = -50%（✅ 真实风险）
         """
+        if true_capital <= 0:
+            return {
+                "max_drawdown_pct": 0,
+                "peak_return": 0,
+                "trough_return": 0,
+                "total_trades": 0
+            }
+
         trade_returns = []
 
         # 提取每笔平仓交易的收益率
@@ -1120,18 +1149,14 @@ class ApexCalculator:
             if closed_pnl == 0:
                 continue
 
-            # 计算仓位价值
-            px = float(fill.get('px', 0))
-            sz = abs(float(fill.get('sz', 0)))
-            position_value = px * sz
+            # ✅ 关键改进：使用真实本金计算收益率
+            trade_return = closed_pnl / true_capital
 
-            if position_value > 0:
-                trade_return = closed_pnl / position_value
-                # 限制单笔收益率范围：[-0.99, 10.0]（防止极端值）
-                # -0.99 = -99%（最多亏完）
-                # 10.0 = 1000%（合理的最大盈利上限）
-                trade_return = max(-0.99, min(trade_return, 10.0))
-                trade_returns.append(trade_return)
+            # 限制单笔收益率范围：[-0.99, 10.0]（防止极端值）
+            # -0.99 = -99%（最多亏完）
+            # 10.0 = 1000%（合理的最大盈利上限）
+            trade_return = max(-0.99, min(trade_return, 10.0))
+            trade_returns.append(trade_return)
 
         # 数据不足时返回零值
         if len(trade_returns) < 2:
@@ -1240,7 +1265,8 @@ def main():
                 print("🎯 关键指标:")
                 print(f"  • Profit Factor（盈亏因子）: {results.get('profit_factor', 0)}")
                 print(f"  • Sharpe Ratio（夏普比率）: {results.get('sharpe_ratio', 0):.4f}")
-                print(f"  • Max Drawdown（最大回撤）: {results.get('max_drawdown', 0):.2f}%")
+                max_dd_on_capital = results.get('max_drawdown_on_capital', {})
+                print(f"  • Max Drawdown（最大回撤）: {max_dd_on_capital.get('max_drawdown_pct', 0):.2f}%")
 
                 win_rate = results.get('win_rate', {})
                 print(f"  • Win Rate（胜率）: {win_rate.get('winRate', 0):.2f}%")

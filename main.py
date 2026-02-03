@@ -39,15 +39,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AnalysisResults:
     """分析结果数据类"""
-    trade_sharpe: Dict[str, float]
     trade_dd: Dict[str, float]
     win_rate_data: Dict[str, Any]
     hold_time_stats: Dict[str, float]
     data_summary: Dict[str, Any]
     position_analysis: Dict[str, Any]
     profit_factor: float
-    account_sharpe: float
-    account_dd: float
     raw_results: Dict[str, Any]
 
 # ========== 输出格式化 ==========
@@ -57,28 +54,21 @@ def print_section(title: str, char: str = "=") -> None:
     print(f"\n{line}")
     print(f"{title}")
     print(f"{line}")
-    logger.debug(f"Section: {title}")
 
 def print_metric(label: str, value: str, icon: str = "  •") -> None:
     """打印指标"""
     print(f"{icon} {label}: {value}")
-    logger.debug(f"Metric - {label}: {value}")
 
 # ========== 数据提取 ==========
 def extract_analysis_data(calculator: ApexCalculator, results: Dict[str, Any],
                           user_address: str) -> Optional[AnalysisResults]:
     """从结果中提取分析数据"""
     try:
-        logger.info("开始提取分析数据...")
-
         # 获取嵌套数据
         win_rate_data = results.get('win_rate', {})
         hold_time_stats = results.get('hold_time_stats', {})
         data_summary = results.get('data_summary', {})
         position_analysis = results.get('position_analysis', {})
-
-        logger.debug(f"Win rate data: {win_rate_data}")
-        logger.debug(f"Position analysis: {position_analysis}")
 
         # 获取交易级别数据
         fills = results.get('_raw_fills', [])
@@ -87,25 +77,21 @@ def extract_analysis_data(calculator: ApexCalculator, results: Dict[str, Any],
             user_data = calculator.get_user_data(user_address, force_refresh=False)
             fills = user_data.get('fills', [])
 
-        logger.info(f"获取到 {len(fills)} 条成交记录")
-
-        # 计算交易级别指标
-        trade_sharpe = calculator.calculate_trade_level_sharpe_ratio(fills)
-        trade_dd = calculator.calculate_trade_level_max_drawdown(fills)
-
-        logger.info(f"交易级别 Sharpe: {trade_sharpe['annualized_sharpe']:.2f}")
-        logger.info(f"交易级别最大回撤: {trade_dd['max_drawdown_pct']:.2f}%")
+        # 使用基于真实本金的最大回撤（从 results 中获取）
+        trade_dd = results.get('max_drawdown_on_capital', {
+            "max_drawdown_pct": 0,
+            "peak_return": 0,
+            "trough_return": 0,
+            "total_trades": 0
+        })
 
         return AnalysisResults(
-            trade_sharpe=trade_sharpe,
             trade_dd=trade_dd,
             win_rate_data=win_rate_data,
             hold_time_stats=hold_time_stats,
             data_summary=data_summary,
             position_analysis=position_analysis,
             profit_factor=results.get('profit_factor', 0),
-            account_sharpe=results.get('sharpe_ratio', 0),
-            account_dd=results.get('max_drawdown', 0),
             raw_results=results
         )
     except Exception as e:
@@ -119,32 +105,29 @@ def display_header() -> None:
     print("基于Hyperliquid官方API和Apex Liquid Bot算法")
     print("✅ 完全不受出入金影响的准确指标")
     print("=" * 70)
-    logger.info("Apex Fork 交易分析系统启动")
 
 def display_core_metrics(analysis: AnalysisResults) -> None:
     """显示核心指标（交易级别）"""
     print_section("📈 核心指标（交易级别 - 完全不受出入金影响）")
 
-    # Sharpe Ratio
-    trade_sharpe = analysis.trade_sharpe
-    print("\n✅ Sharpe Ratio (交易级别):")
-    print_metric("年化 Sharpe", f"{trade_sharpe['annualized_sharpe']:.2f}")
-    print_metric("每笔 Sharpe", f"{trade_sharpe['sharpe_ratio']:.4f}")
-    print_metric("平均每笔收益率", f"{trade_sharpe['mean_return_per_trade']:.4%}")
-    print_metric("收益率标准差", f"{trade_sharpe['std_dev']:.4%}")
+    # Sharpe Ratio - 基于真实本金
+    sharpe_on_capital = analysis.raw_results.get('sharpe_on_capital', {})
+    if sharpe_on_capital and sharpe_on_capital.get('total_trades', 0) > 0:
+        print("\n✅ Sharpe Ratio (基于真实本金):")
+        print_metric("年化 Sharpe", f"{sharpe_on_capital['annualized_sharpe']:.2f}")
+        print_metric("每笔 Sharpe", f"{sharpe_on_capital['sharpe_ratio']:.4f}")
+        print_metric("平均每笔收益率", f"{sharpe_on_capital['mean_return_per_trade']:.4%}")
+        print_metric("收益率标准差", f"{sharpe_on_capital['std_dev']:.4%}")
 
-    # 解读
-    sharpe_val = trade_sharpe['annualized_sharpe']
-    if sharpe_val > 1:
-        interpretation = "✅ 优秀的风险调整收益"
-        logger.info(f"Sharpe Ratio 评级: 优秀 ({sharpe_val:.2f})")
-    elif sharpe_val > 0:
-        interpretation = "⚠️  正收益但风险较高"
-        logger.warning(f"Sharpe Ratio 评级: 风险较高 ({sharpe_val:.2f})")
-    else:
-        interpretation = "❌ 负的风险调整收益"
-        logger.error(f"Sharpe Ratio 评级: 负收益 ({sharpe_val:.2f})")
-    print_metric("评级", interpretation, icon="  →")
+        # 解读
+        sharpe_val = sharpe_on_capital['annualized_sharpe']
+        if sharpe_val > 1:
+            interpretation = "✅ 优秀的风险调整收益"
+        elif sharpe_val > 0:
+            interpretation = "⚠️  正收益但风险较高"
+        else:
+            interpretation = "❌ 负的风险调整收益"
+        print_metric("评级", interpretation, icon="  →")
 
     # Max Drawdown
     trade_dd = analysis.trade_dd
@@ -157,13 +140,10 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
     dd_pct = trade_dd['max_drawdown_pct']
     if dd_pct < 20:
         risk_level = "🟢 低风险"
-        logger.info(f"风险等级: 低 ({dd_pct:.2f}%)")
     elif dd_pct < 50:
         risk_level = "🟡 中等风险"
-        logger.warning(f"风险等级: 中等 ({dd_pct:.2f}%)")
     else:
         risk_level = "🔴 高风险"
-        logger.error(f"风险等级: 高 ({dd_pct:.2f}%)")
     print_metric("风险等级", risk_level, icon="  →")
 
     # 交易统计
@@ -173,51 +153,6 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
     print_metric("Direction Bias", f"{analysis.win_rate_data.get('bias', 0):.2f}%")
     print_metric("Total Trades", f"{analysis.win_rate_data.get('totalTrades', 0)}")
     print_metric("Avg Hold Time", f"{analysis.hold_time_stats.get('allTimeAverage', 0):.2f} 天")
-
-def display_account_comparison(analysis: AnalysisResults) -> None:
-    """显示账户级别对比"""
-    print_section("⚠️  对比参考（账户级别 - 受出入金影响）", char="-")
-
-    print("\n账户级别 Sharpe Ratio:")
-    print_metric("Sharpe Ratio",
-                f"{analysis.account_sharpe:.4f} ⚠️  受出入金影响", icon="  ")
-
-    print("\n账户级别 Max Drawdown:")
-    print_metric("Max Drawdown",
-                f"{analysis.account_dd:.2f}% ⚠️  受出入金影响", icon="  ")
-
-    # 对比说明
-    print("\n💡 对比说明:")
-    trade_sharpe_val = analysis.trade_sharpe['annualized_sharpe']
-    account_sharpe_val = analysis.account_sharpe
-
-    print(f"  • 交易级别 Sharpe ({trade_sharpe_val:.2f}) vs "
-          f"账户级别 ({account_sharpe_val:.4f})")
-
-    # 计算差异
-    if abs(account_sharpe_val) > 0.001:
-        diff_ratio = abs(trade_sharpe_val / account_sharpe_val)
-        if diff_ratio > 10:
-            msg = f"差异 {diff_ratio:.0f}x 说明账户级别严重失真"
-            logger.warning(msg)
-            print(f"  • {msg}")
-        elif diff_ratio > 2:
-            msg = f"差异 {diff_ratio:.1f}x 说明账户级别存在偏差"
-            logger.info(msg)
-            print(f"  • {msg}")
-        else:
-            msg = f"差异 {diff_ratio:.2f}x，两种方法较为接近"
-            logger.info(msg)
-            print(f"  • {msg}")
-    else:
-        msg = "账户级别 Sharpe 接近 0，无法进行有效对比"
-        logger.warning(msg)
-        print(f"  • {msg}")
-
-    print(f"  • 推荐使用交易级别指标，因为：")
-    print(f"    1. ✅ 完全不依赖账户价值")
-    print(f"    2. ✅ 不受出入金影响")
-    print(f"    3. ✅ 反映策略真实表现")
 
 def display_account_info(analysis: AnalysisResults) -> None:
     """显示账户信息"""
@@ -264,12 +199,6 @@ def display_account_info(analysis: AnalysisResults) -> None:
     print_metric("  ├─ 净盈利", f"${return_metrics.get('net_profit', 0):,.2f}")
     print_metric("  └─ 交易天数", f"{return_metrics.get('trading_days', 0):.1f} 天")
 
-    logger.debug(f"Total account value: ${total_account_value:,.2f}")
-    logger.debug(f"Perp account value: ${perp_account_value:,.2f}")
-    logger.debug(f"Spot account value: ${spot_account_value:,.2f}")
-    logger.debug(f"Total cumulative PnL: ${total_cumulative_pnl:,.2f}")
-    logger.debug(f"Positions: {position_analysis.get('total_positions', 0)}")
-
 def display_hold_time_stats(analysis: AnalysisResults) -> None:
     """显示持仓时间统计"""
     print_section("⏱️  持仓时间统计")
@@ -293,14 +222,17 @@ def display_strategy_evaluation(analysis: AnalysisResults) -> None:
     """显示策略评估"""
     print_section("🎯 策略评估总结")
 
+    # 获取 Sharpe Ratio 数据
+    sharpe_on_capital = analysis.raw_results.get('sharpe_on_capital', {})
+
     # 优势
     print("\n✅ 优势:")
     advantages = []
 
-    if analysis.trade_sharpe['annualized_sharpe'] > 1:
+    if sharpe_on_capital.get('annualized_sharpe', 0) > 1:
         advantages.append("优秀的风险调整收益（Sharpe > 1）")
-    if analysis.trade_sharpe['mean_return_per_trade'] > 0:
-        pct = analysis.trade_sharpe['mean_return_per_trade']
+    if sharpe_on_capital.get('mean_return_per_trade', 0) > 0:
+        pct = sharpe_on_capital['mean_return_per_trade']
         advantages.append(f"正期望策略（每笔平均 {pct:.4%}）")
     if analysis.profit_factor > 1:
         advantages.append(f"盈利策略（Profit Factor = {analysis.profit_factor:.2f}）")
@@ -308,10 +240,8 @@ def display_strategy_evaluation(analysis: AnalysisResults) -> None:
     if advantages:
         for adv in advantages:
             print(f"  • {adv}")
-        logger.info(f"策略优势: {len(advantages)} 项")
     else:
         print("  • 暂无明显优势")
-        logger.warning("策略未发现明显优势")
 
     # 风险
     print("\n⚠️  风险:")
@@ -327,10 +257,8 @@ def display_strategy_evaluation(analysis: AnalysisResults) -> None:
     if risks:
         for risk in risks:
             print(f"  • {risk}")
-        logger.warning(f"策略风险: {len(risks)} 项")
     else:
         print("  • 风险可控")
-        logger.info("策略风险可控")
 
     # 改进建议
     print("\n💡 改进建议:")
@@ -376,24 +304,19 @@ def analyze_user_trading(user_address: str, force_refresh: bool = False,
         bool: 分析是否成功
     """
     try:
-        logger.info(f"开始分析用户: {user_address}")
         print(f"\n📊 分析用户: {user_address}")
         print("=" * 70)
 
         # 初始化计算器
         calculator = ApexCalculator()
-        logger.debug("ApexCalculator 初始化完成")
 
         # 执行分析
-        logger.info("执行完整分析...")
         results = calculator.analyze_user(user_address, force_refresh=force_refresh)
 
         if "error" in results:
             logger.error(f"分析失败: {results['error']}")
             print(f"\n❌ 分析失败: {results['error']}")
             return False
-
-        logger.info("分析完成，开始提取数据...")
 
         # 提取分析数据
         analysis = extract_analysis_data(calculator, results, user_address)
@@ -409,7 +332,6 @@ def analyze_user_trading(user_address: str, force_refresh: bool = False,
 
         # 生成报告（可选）
         if generate_report:
-            logger.info("生成 Markdown 报告...")
             print("\n")
             print_section("📄 生成 Markdown 报告")
             report_filename = f"trading_report_{user_address[:8]}.md"
@@ -417,13 +339,10 @@ def analyze_user_trading(user_address: str, force_refresh: bool = False,
             print(f"\n{save_result}")
             print(f"💡 提示: 使用 Markdown 查看器打开报告文件")
             print("=" * 70)
-            logger.info(f"报告已保存: {report_filename}")
 
-        logger.info("分析流程完成")
         return True
 
     except KeyboardInterrupt:
-        logger.warning("用户中断操作")
         print("\n\n⚠️  操作已取消")
         return False
 
@@ -453,7 +372,6 @@ def parse_arguments() -> Dict[str, Any]:
             args['user_address'] = arg
             break
 
-    logger.debug(f"解析参数: {args}")
     return args
 
 def display_help() -> None:
@@ -516,7 +434,6 @@ def main() -> None:
     user_address = args['user_address']
     if not user_address:
         user_address = "0xde786a32f80731923d6297c14ef43ca1c8fd4b44"
-        logger.info(f"使用默认示例地址: {user_address}")
 
     # 执行分析
     success = analyze_user_trading(
