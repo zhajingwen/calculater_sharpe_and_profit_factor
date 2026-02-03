@@ -636,6 +636,8 @@ class ApexCalculator:
                     "total_fills": len(fills),
                     "total_positions": len(asset_positions),
                     "account_value": safe_float(margin_summary.get('accountValue')),
+                    "perp_account_value": safe_float(margin_summary.get('perpAccountValue')),
+                    "spot_account_value": safe_float(margin_summary.get('spotAccountValue')),
                     "total_margin_used": safe_float(margin_summary.get('totalMarginUsed'))
                 }
             }
@@ -718,6 +720,50 @@ class ApexCalculator:
                 results["position_analysis"] = {"total_positions": 0, "total_unrealized_pnl": 0}
                 print(f"  ⚠ 当前持仓: 无持仓")
 
+            # 指标7: 累计总PNL (Total Cumulative PnL)
+            total_realized_pnl = sum(safe_float(fill.get('closedPnl', 0)) for fill in fills)
+            total_unrealized_pnl = results["position_analysis"].get('total_unrealized_pnl', 0)
+            total_cumulative_pnl = total_realized_pnl + total_unrealized_pnl
+            results["total_realized_pnl"] = total_realized_pnl
+            results["total_cumulative_pnl"] = total_cumulative_pnl
+            print(f"  ✓ 累计总盈亏: ${total_cumulative_pnl:,.2f}")
+            print(f"    - 已实现盈亏: ${total_realized_pnl:,.2f}")
+            print(f"    - 未实现盈亏: ${total_unrealized_pnl:,.2f}")
+
+            # 指标8: 真实本金计算 (True Capital)
+            print(f"\n📊 计算本金和收益率指标:")
+            print(f"  → 获取账本记录...")
+            ledger_records = self.api_client.get_user_ledger(user_address, start_time=0)
+
+            capital_info = self.calculate_true_capital(ledger_records)
+            results["capital_info"] = capital_info
+            print(f"  ✓ 真实本金: ${capital_info['true_capital']:,.2f}")
+            print(f"    - 总充值: ${capital_info['total_deposits']:,.2f}")
+            print(f"    - 总提现: ${capital_info['total_withdrawals']:,.2f}")
+
+            # 指标9: 累计收益率和年化收益率 (Return Metrics)
+            current_account_value = results["data_summary"].get("account_value", 0)
+
+            # 获取第一笔和最后一笔交易时间
+            if fills:
+                first_trade_time = min(fill.get('time', 0) for fill in fills if fill.get('time', 0) > 0)
+                last_trade_time = max(fill.get('time', 0) for fill in fills if fill.get('time', 0) > 0)
+            else:
+                first_trade_time = 0
+                last_trade_time = 0
+
+            return_metrics = self.calculate_return_metrics(
+                current_value=current_account_value,
+                true_capital=capital_info['true_capital'],
+                first_trade_time=first_trade_time,
+                last_trade_time=last_trade_time
+            )
+            results["return_metrics"] = return_metrics
+            print(f"  ✓ 累计收益率: {return_metrics['cumulative_return']:.2f}%")
+            print(f"  ✓ 年化收益率: {return_metrics['annualized_return']:.2f}%")
+            print(f"    - 净盈利: ${return_metrics['net_profit']:,.2f}")
+            print(f"    - 交易天数: {return_metrics['trading_days']:.1f} 天")
+
             print(f"\n{'='*60}")
             print("✅ 分析完成!")
             print(f"{'='*60}")
@@ -730,6 +776,91 @@ class ApexCalculator:
             import traceback
             print(f"详细错误信息:\n{traceback.format_exc()}")
             return {"error": error_msg}
+
+    def calculate_true_capital(self, ledger_records: List[Dict]) -> Dict[str, float]:
+        """
+        计算真实本金（充值 - 提现）
+
+        参数：
+            ledger_records: 账本记录列表
+
+        返回：
+            字典，包含：
+            - total_deposits: 总充值
+            - total_withdrawals: 总提现
+            - true_capital: 真实本金 (充值 - 提现)
+        """
+        total_deposits = 0.0
+        total_withdrawals = 0.0
+
+        for record in ledger_records:
+            delta = record.get('delta', {})
+            delta_type = delta.get('type', '')
+
+            if delta_type == 'deposit':
+                # 充值
+                amount = safe_float(delta.get('usdc', 0))
+                total_deposits += amount
+            elif delta_type == 'withdraw':
+                # 提现
+                amount = safe_float(delta.get('usdc', 0))
+                total_withdrawals += abs(amount)  # 提现可能是负数
+
+        true_capital = total_deposits - total_withdrawals
+
+        return {
+            "total_deposits": total_deposits,
+            "total_withdrawals": total_withdrawals,
+            "true_capital": true_capital
+        }
+
+    def calculate_return_metrics(self, current_value: float, true_capital: float,
+                                 first_trade_time: int, last_trade_time: int) -> Dict[str, float]:
+        """
+        计算累计收益率和年化收益率
+
+        参数：
+            current_value: 当前总账户价值
+            true_capital: 真实本金（充值 - 提现）
+            first_trade_time: 第一笔交易时间戳（毫秒）
+            last_trade_time: 最后一笔交易时间戳（毫秒）
+
+        返回：
+            字典，包含：
+            - cumulative_return: 累计收益率（百分比）
+            - annualized_return: 年化收益率（百分比）
+            - net_profit: 净盈利（美元）
+            - trading_days: 交易天数
+        """
+        # 计算净盈利
+        net_profit = current_value - true_capital
+
+        # 计算累计收益率
+        if true_capital > 0:
+            cumulative_return = (net_profit / true_capital) * 100
+        else:
+            cumulative_return = 0.0
+
+        # 计算交易天数
+        if first_trade_time > 0 and last_trade_time > first_trade_time:
+            trading_days = (last_trade_time - first_trade_time) / 1000 / 86400
+        else:
+            trading_days = 0.0
+
+        # 计算年化收益率
+        if trading_days > 0 and true_capital > 0:
+            # 年化收益率 = ((1 + 累计收益率) ^ (365 / 交易天数) - 1) × 100%
+            annual_factor = 365.0 / trading_days
+            annualized_return = (math.pow(1 + cumulative_return / 100, annual_factor) - 1) * 100
+        else:
+            annualized_return = 0.0
+
+        return {
+            "cumulative_return": cumulative_return,
+            "annualized_return": annualized_return,
+            "net_profit": net_profit,
+            "trading_days": trading_days
+        }
 
     def _analyze_current_positions(self, asset_positions: List[Dict]) -> Dict[str, Any]:
         """

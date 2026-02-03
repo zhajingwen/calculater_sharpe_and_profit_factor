@@ -225,13 +225,46 @@ def display_account_info(analysis: AnalysisResults) -> None:
 
     data_summary = analysis.data_summary
     position_analysis = analysis.position_analysis
+    raw_results = analysis.raw_results
 
-    print_metric("Account Value", f"${data_summary.get('account_value', 0):,.2f}")
+    # 账户价值详情
+    total_account_value = data_summary.get('account_value', 0)
+    perp_account_value = data_summary.get('perp_account_value', 0)
+    spot_account_value = data_summary.get('spot_account_value', 0)
+
+    print_metric("总账户价值", f"${total_account_value:,.2f}")
+    print_metric("  ├─ Perp 账户价值", f"${perp_account_value:,.2f}")
+    print_metric("  └─ Spot 账户价值", f"${spot_account_value:,.2f}")
     print_metric("Margin Used", f"${data_summary.get('total_margin_used', 0):,.2f}")
     print_metric("Current Positions", f"{position_analysis.get('total_positions', 0)}")
-    print_metric("Unrealized PnL", f"${position_analysis.get('total_unrealized_pnl', 0):,.2f}")
 
-    logger.debug(f"Account value: ${data_summary.get('account_value', 0):,.2f}")
+    # PNL信息
+    print("\n盈亏统计:")
+    total_cumulative_pnl = raw_results.get('total_cumulative_pnl', 0)
+    total_realized_pnl = raw_results.get('total_realized_pnl', 0)
+    total_unrealized_pnl = position_analysis.get('total_unrealized_pnl', 0)
+
+    print_metric("累计总盈亏", f"${total_cumulative_pnl:,.2f}")
+    print_metric("  ├─ 已实现盈亏", f"${total_realized_pnl:,.2f}")
+    print_metric("  └─ 未实现盈亏", f"${total_unrealized_pnl:,.2f}")
+
+    # 本金和收益率信息
+    print("\n本金与收益率:")
+    capital_info = raw_results.get('capital_info', {})
+    return_metrics = raw_results.get('return_metrics', {})
+
+    print_metric("真实本金", f"${capital_info.get('true_capital', 0):,.2f}")
+    print_metric("  ├─ 总充值", f"${capital_info.get('total_deposits', 0):,.2f}")
+    print_metric("  └─ 总提现", f"${capital_info.get('total_withdrawals', 0):,.2f}")
+    print_metric("累计收益率", f"{return_metrics.get('cumulative_return', 0):.2f}%")
+    print_metric("年化收益率", f"{return_metrics.get('annualized_return', 0):.2f}%")
+    print_metric("  ├─ 净盈利", f"${return_metrics.get('net_profit', 0):,.2f}")
+    print_metric("  └─ 交易天数", f"{return_metrics.get('trading_days', 0):.1f} 天")
+
+    logger.debug(f"Total account value: ${total_account_value:,.2f}")
+    logger.debug(f"Perp account value: ${perp_account_value:,.2f}")
+    logger.debug(f"Spot account value: ${spot_account_value:,.2f}")
+    logger.debug(f"Total cumulative PnL: ${total_cumulative_pnl:,.2f}")
     logger.debug(f"Positions: {position_analysis.get('total_positions', 0)}")
 
 def display_hold_time_stats(analysis: AnalysisResults) -> None:
@@ -479,7 +512,7 @@ def main() -> None:
     # 确定用户地址
     user_address = args['user_address']
     if not user_address:
-        user_address = "0x3ca32dd3666ed1b69e86b86b420b058caa8c1aaf"
+        user_address = "0xde786a32f80731923d6297c14ef43ca1c8fd4b44"
         logger.info(f"使用默认示例地址: {user_address}")
 
     # 执行分析

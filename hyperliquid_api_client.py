@@ -226,19 +226,87 @@ class HyperliquidAPIClient:
         # 修复：assetPositions 直接在 userState 下，不在 clearinghouseState 里
         return user_state.get("assetPositions", [])
     
-    def get_user_margin_summary(self, user_address: str) -> Dict[str, Any]:
+    def get_spot_clearinghouse_state(self, user_address: str) -> Dict[str, Any]:
         """
-        获取用户保证金摘要
+        获取用户 Spot 清算所状态
 
         Args:
             user_address: 用户地址
 
         Returns:
-            保证金摘要数据
+            Spot 清算所状态数据
         """
+        payload = {
+            "type": "spotClearinghouseState",
+            "user": user_address
+        }
+
+        try:
+            response = self._make_request("/info", payload)
+            return response
+        except Exception as e:
+            print(f"获取 Spot 清算所状态失败: {e}")
+            return {}
+
+    def get_user_margin_summary(self, user_address: str) -> Dict[str, Any]:
+        """
+        获取用户保证金摘要（包含正确的总账户价值计算）
+
+        正确的账户价值计算公式:
+        总账户价值 = Perp 账户价值 + Spot 账户价值
+
+        Perp 账户价值:
+        - 从 user_state API (clearinghouseState) 的 accountValue 获取
+
+        Spot 账户价值:
+        - 从 spotClearinghouseState API 获取
+        - USDC: 使用实际余额 (1:1 美元)
+        - 其他代币: 使用 entryNtl (入账价值/历史成本)
+        - 注意: entryNtl 是历史成本, 不是实时市值
+
+        Args:
+            user_address: 用户地址
+
+        Returns:
+            保证金摘要数据（包含修正后的 accountValue）
+        """
+        # 获取 Perp 账户状态 (clearinghouseState)
         user_state = self.get_user_state(user_address)
-        # 修复：marginSummary 直接在 userState 下，不在 clearinghouseState 里
-        return user_state.get("marginSummary", {})
+        margin_summary = user_state.get("marginSummary", {})
+
+        # 获取 Perp 账户价值
+        perp_account_value = safe_float(margin_summary.get("accountValue", 0))
+
+        # 获取 Spot 账户状态 (spotClearinghouseState)
+        spot_state = self.get_spot_clearinghouse_state(user_address)
+
+        # 计算 Spot 账户价值
+        spot_account_value = 0.0
+        balances = spot_state.get("balances", [])
+
+        for balance in balances:
+            coin = balance.get("coin", "")
+
+            # USDC: 使用实际余额 (1:1 美元)
+            if coin == "USDC":
+                coin_balance = safe_float(balance.get("total", 0))
+                spot_account_value += coin_balance
+            else:
+                # 其他代币: 使用 entryNtl (入账价值/历史成本)
+                # 注意: entryNtl 是历史成本, 不是实时市值
+                entry_ntl = safe_float(balance.get("entryNtl", 0))
+                spot_account_value += entry_ntl
+
+        # 计算正确的总账户价值
+        total_account_value = perp_account_value + spot_account_value
+
+        # 更新 margin_summary 中的 accountValue 为正确的总账户价值
+        margin_summary_corrected = margin_summary.copy()
+        margin_summary_corrected["accountValue"] = total_account_value
+        margin_summary_corrected["perpAccountValue"] = perp_account_value
+        margin_summary_corrected["spotAccountValue"] = spot_account_value
+
+        return margin_summary_corrected
     
     def get_user_open_orders(self, user_address: str) -> List[Dict[str, Any]]:
         """
@@ -263,10 +331,10 @@ class HyperliquidAPIClient:
     def get_user_twap_slice_fills(self, user_address: str) -> List[Dict[str, Any]]:
         """
         获取用户TWAP切片成交记录
-        
+
         Args:
             user_address: 用户地址
-            
+
         Returns:
             TWAP切片成交记录
         """
@@ -275,13 +343,39 @@ class HyperliquidAPIClient:
                 "type": "userTwapSliceFills",
                 "user": user_address
             }
-            
+
             response = self._make_request("/info", payload)
             if isinstance(response, list):
                 return response
             return response.get("fills", [])
         except Exception as e:
             print(f"获取TWAP切片成交记录失败: {e}")
+            return []
+
+    def get_user_ledger(self, user_address: str, start_time: int = 0) -> List[Dict[str, Any]]:
+        """
+        获取用户账本记录（充值、提现、转账等）
+
+        Args:
+            user_address: 用户地址
+            start_time: 起始时间戳（毫秒），默认0表示从最早开始
+
+        Returns:
+            账本记录列表
+        """
+        try:
+            payload = {
+                "type": "userNonFundingLedgerUpdates",
+                "user": user_address,
+                "startTime": start_time
+            }
+
+            response = self._make_request("/info", payload)
+            if isinstance(response, list):
+                return response
+            return response.get("ledgerUpdates", [])
+        except Exception as e:
+            print(f"获取账本记录失败: {e}")
             return []
     
     def get_user_portfolio_data(self, user_address: str) -> Dict[str, Any]:
@@ -290,7 +384,7 @@ class HyperliquidAPIClient:
 
         优化说明:
         - 添加请求间延迟避免API限流
-        - 从user_state直接提取数据减少API调用
+        - 使用正确的账户价值计算（Perp + Spot）
         - 避免重复请求
 
         Args:
@@ -306,21 +400,25 @@ class HyperliquidAPIClient:
             fills = self.get_user_fills(user_address)
             time.sleep(0.5)  # 延迟500ms避免限流
 
-            # 第二批请求: 获取用户状态（包含持仓和保证金信息）
+            # 第二批请求: 获取用户状态（包含持仓信息）
             user_state = self.get_user_state(user_address)
 
             # 直接从user_state提取数据，避免额外的API请求
             asset_positions = user_state.get("assetPositions", [])
-            margin_summary = user_state.get("marginSummary", {})
 
             time.sleep(0.5)  # 延迟500ms
 
-            # 第三批请求: 获取未成交订单
+            # 第三批请求: 获取正确计算的保证金摘要（包含 Perp + Spot 账户价值）
+            margin_summary = self.get_user_margin_summary(user_address)
+
+            time.sleep(0.5)  # 延迟500ms
+
+            # 第四批请求: 获取未成交订单
             open_orders = self.get_user_open_orders(user_address)
 
             time.sleep(0.5)  # 延迟500ms
 
-            # 第四批请求: 获取TWAP数据
+            # 第五批请求: 获取TWAP数据
             twap_fills = self.get_user_twap_slice_fills(user_address)
 
             # 确保所有数据都是列表或字典
@@ -344,14 +442,19 @@ class HyperliquidAPIClient:
                 "fills": fills,
                 "userState": user_state,
                 "assetPositions": asset_positions,
-                "marginSummary": margin_summary,
+                "marginSummary": margin_summary,  # 现在包含正确计算的总账户价值
                 "openOrders": open_orders,
                 "twapFills": twap_fills,
             }
 
+            # 输出账户价值详情以便验证
+            perp_value = margin_summary.get("perpAccountValue", 0)
+            spot_value = margin_summary.get("spotAccountValue", 0)
+            total_value = margin_summary.get("accountValue", 0)
             print(f"成功获取数据: {len(fills)} 条成交记录, {len(asset_positions)} 个持仓")
+            print(f"账户价值详情: Perp=${perp_value:,.2f}, Spot=${spot_value:,.2f}, 总计=${total_value:,.2f}")
             return portfolio_data
-            
+
         except Exception as e:
             print(f"获取投资组合数据失败: {e}")
             return {}

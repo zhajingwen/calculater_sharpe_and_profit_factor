@@ -108,10 +108,28 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
 | 项目 | 数值 |
 |------|------|
-| 账户价值 | ${data_summary.get('account_value', 0):,.2f} |
+| **总账户价值** | **${data_summary.get('account_value', 0):,.2f}** |
+| ├─ Perp 账户价值 | ${data_summary.get('perp_account_value', 0):,.2f} |
+| └─ Spot 账户价值 | ${data_summary.get('spot_account_value', 0):,.2f} |
 | 保证金使用 | ${data_summary.get('total_margin_used', 0):,.2f} |
 | 当前持仓 | {position_analysis.get('total_positions', 0)} |
-| 未实现盈亏 | ${position_analysis.get('total_unrealized_pnl', 0):,.2f} |
+| **累计总盈亏** | **${results.get('total_cumulative_pnl', 0):,.2f}** |
+| ├─ 已实现盈亏 | ${results.get('total_realized_pnl', 0):,.2f} |
+| └─ 未实现盈亏 | ${position_analysis.get('total_unrealized_pnl', 0):,.2f} |
+
+---
+
+## 💵 本金与收益率
+
+| 项目 | 数值 |
+|------|------|
+| **真实本金** | **${results.get('capital_info', {}).get('true_capital', 0):,.2f}** |
+| ├─ 总充值 | ${results.get('capital_info', {}).get('total_deposits', 0):,.2f} |
+| └─ 总提现 | ${results.get('capital_info', {}).get('total_withdrawals', 0):,.2f} |
+| **累计收益率** | **{results.get('return_metrics', {}).get('cumulative_return', 0):.2f}%** |
+| **年化收益率** | **{results.get('return_metrics', {}).get('annualized_return', 0):.2f}%** |
+| 净盈利 | ${results.get('return_metrics', {}).get('net_profit', 0):,.2f} |
+| 交易天数 | {results.get('return_metrics', {}).get('trading_days', 0):.1f} 天 |
 
 ---
 
