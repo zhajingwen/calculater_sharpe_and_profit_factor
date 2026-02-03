@@ -80,9 +80,13 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 |------|------|------|
 | 最大回撤 | **{trade_dd['max_drawdown_pct']:.2f}%** | {'🔴 高风险' if trade_dd['max_drawdown_pct'] > 50 else '🟡 中等风险' if trade_dd['max_drawdown_pct'] > 20 else '🟢 低风险'} |
 | 峰值累计收益 | {trade_dd['peak_return']:.2f}% | 历史最高点 |
+| 峰值日期 | **{trade_dd.get('peak_date', 'N/A')}** | 峰值发生时间 |
 | 谷底累计收益 | {trade_dd['trough_return']:.2f}% | 回撤最低点 |
+| 谷底日期 | **{trade_dd.get('trough_date', 'N/A')}** | 谷底发生时间 |
 
 **风险等级**: {'🔴 高风险' if trade_dd['max_drawdown_pct'] > 50 else '🟡 中等风险' if trade_dd['max_drawdown_pct'] > 20 else '🟢 低风险'}
+
+> 📅 **回撤时间跨度**: 从 {trade_dd.get('peak_date', 'N/A')} 到 {trade_dd.get('trough_date', 'N/A')}
 
 ### 交易统计
 
@@ -159,9 +163,15 @@ Sharpe Ratio = (平均收益率 - 无风险利率) / 收益率标准差
 | 项目 | 数值 |
 |------|------|
 | **累计收益率** | **{results.get('return_metrics', {}).get('cumulative_return', 0):.2f}%** |
-| **年化收益率** | **{results.get('return_metrics', {}).get('annualized_return', 0):.2f}%** |
-| 净盈利 | ${results.get('return_metrics', {}).get('net_profit', 0):,.2f} |
+| **年化收益率** | **{results.get('return_metrics', {}).get('annualized_return', 0):.2f}%**{' ⚠️ (交易天数<30天,仅供参考)' if results.get('return_metrics', {}).get('trading_days', 0) < 30 else ''} |
+| 交易净盈利 | ${results.get('return_metrics', {}).get('net_profit_trading', 0):,.2f} (基于累计总盈亏) |
+| 账户净增长 | ${results.get('return_metrics', {}).get('net_profit_account', 0):,.2f} (当前价值-本金) |
 | 交易天数 | {results.get('return_metrics', {}).get('trading_days', 0):.1f} 天 |
+
+> ℹ️ **盈亏口径说明**：
+> - **交易净盈利**：基于所有成交记录的 closedPnL + 未实现盈亏，准确反映交易策略表现
+> - **账户净增长**：当前账户总价值 - 真实本金，包含所有资金变动
+> - **差异原因**：可能包含 funding fee（资金费率）、空投、外部转账等非交易盈亏
 
 ---
 

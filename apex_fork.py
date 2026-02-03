@@ -607,10 +607,6 @@ class ApexCalculator:
         异常：
             捕获所有异常并返回错误信息
         """
-        print(f"\n{'='*60}")
-        print(f"🔍 开始分析用户: {user_address}")
-        print(f"{'='*60}")
-
         try:
             # 步骤1: 获取用户数据
             user_data = self.get_user_data(user_address, force_refresh)
@@ -622,10 +618,6 @@ class ApexCalculator:
             fills = user_data.get('fills', [])
             asset_positions = user_data.get('assetPositions', [])
             margin_summary = user_data.get('marginSummary', {})
-
-            print(f"\n📊 数据获取完成:")
-            print(f"  ✓ 成交记录: {len(fills)} 条")
-            print(f"  ✓ 当前持仓: {len(asset_positions)} 个")
 
             # 步骤4: 初始化结果字典
             results = {
@@ -642,51 +634,36 @@ class ApexCalculator:
                 }
             }
 
-            print(f"\n📈 计算交易指标:")
-
             # 指标1: 盈亏因子 (Profit Factor)
             if fills:
                 profit_factor = self.calculate_profit_factor(fills, asset_positions)
                 results["profit_factor"] = profit_factor
-                print(f"  ✓ Profit Factor: {profit_factor}")
             else:
                 results["profit_factor"] = 0
-                print(f"  ⚠ Profit Factor: 无成交记录")
-
 
             # 指标3: 胜率统计 (Win Rate)
             if fills:
                 win_stats = self.calculate_win_rate(fills)
                 results["win_rate"] = win_stats
-                print(f"  ✓ Win Rate: {win_stats['winRate']:.2f}%")
-                print(f"    - 方向偏好: {win_stats['bias']:.2f}% ({'多头' if win_stats['bias'] > 50 else '空头' if win_stats['bias'] < 50 else '中性'})")
-                print(f"    - 总交易次数: {win_stats['totalTrades']}")
             else:
                 results["win_rate"] = {"winRate": 0, "bias": 50, "totalTrades": 0}
-                print(f"  ⚠ Win Rate: 无成交记录")
 
             # 指标4: 持仓时间统计 (Hold Time Stats)
             if fills:
                 hold_stats = self.calculate_hold_time_stats(fills)
                 results["hold_time_stats"] = hold_stats
-                print(f"  ✓ 平均持仓时间: {hold_stats['allTimeAverage']:.2f} 天")
             else:
                 results["hold_time_stats"] = {
                     "todayCount": 0, "last7DaysAverage": 0,
                     "last30DaysAverage": 0, "allTimeAverage": 0
                 }
-                print(f"  ⚠ 持仓时间统计: 无成交记录")
 
             # 指标6: 当前持仓分析 (Current Positions)
             if asset_positions:
                 position_analysis = self._analyze_current_positions(asset_positions)
                 results["position_analysis"] = position_analysis
-                print(f"  ✓ 当前持仓: {len(asset_positions)} 个活跃仓位")
-                print(f"    - 总未实现盈亏: ${position_analysis.get('total_unrealized_pnl', 0):.2f}")
-                print(f"    - 仓位偏好: {position_analysis.get('position_bias', 'Unknown')}")
             else:
                 results["position_analysis"] = {"total_positions": 0, "total_unrealized_pnl": 0}
-                print(f"  ⚠ 当前持仓: 无持仓")
 
             # 指标7: 累计总PNL (Total Cumulative PnL)
             total_realized_pnl = sum(safe_float(fill.get('closedPnl', 0)) for fill in fills)
@@ -694,22 +671,11 @@ class ApexCalculator:
             total_cumulative_pnl = total_realized_pnl + total_unrealized_pnl
             results["total_realized_pnl"] = total_realized_pnl
             results["total_cumulative_pnl"] = total_cumulative_pnl
-            print(f"  ✓ 累计总盈亏: ${total_cumulative_pnl:,.2f}")
-            print(f"    - 已实现盈亏: ${total_realized_pnl:,.2f}")
-            print(f"    - 未实现盈亏: ${total_unrealized_pnl:,.2f}")
 
             # 指标8: 真实本金计算 (True Capital)
-            print(f"\n📊 计算本金和收益率指标:")
-            print(f"  → 获取账本记录...")
             ledger_records = self.api_client.get_user_ledger(user_address, start_time=0)
-
             capital_info = self.calculate_true_capital(user_address, ledger_records)
             results["capital_info"] = capital_info
-            print(f"  ✓ 真实本金: ${capital_info['true_capital']:,.2f}")
-            print(f"    - 总充值: ${capital_info['total_deposits']:,.2f}")
-            print(f"    - 总提现: ${capital_info['total_withdrawals']:,.2f}")
-            print(f"    - 外部转入 Spot: ${capital_info['external_to_spot']:,.2f}")
-            print(f"    - 外部转出: ${capital_info['external_out']:,.2f}")
 
             # 指标9: 累计收益率和年化收益率 (Return Metrics)
             current_account_value = results["data_summary"].get("account_value", 0)
@@ -725,28 +691,18 @@ class ApexCalculator:
             return_metrics = self.calculate_return_metrics(
                 current_value=current_account_value,
                 true_capital=capital_info['true_capital'],
+                total_cumulative_pnl=total_cumulative_pnl,
                 first_trade_time=first_trade_time,
                 last_trade_time=last_trade_time
             )
             results["return_metrics"] = return_metrics
-            print(f"  ✓ 累计收益率: {return_metrics['cumulative_return']:.2f}%")
-            print(f"  ✓ 年化收益率: {return_metrics['annualized_return']:.2f}%")
-            print(f"    - 净盈利: ${return_metrics['net_profit']:,.2f}")
-            print(f"    - 交易天数: {return_metrics['trading_days']:.1f} 天")
-
             # 指标10: 基于真实本金的 Sharpe Ratio（推荐方法）
             if fills and len(fills) > 1:
-                print(f"\n📈 计算 Sharpe Ratio（基于真实本金）:")
                 sharpe_on_capital = self.calculate_sharpe_ratio_on_capital(
                     fills=fills,
                     true_capital=capital_info['true_capital']
                 )
                 results["sharpe_on_capital"] = sharpe_on_capital
-                print(f"  ✓ Sharpe Ratio (每笔交易): {sharpe_on_capital['sharpe_ratio']:.4f}")
-                print(f"  ✓ Sharpe Ratio (年化): {sharpe_on_capital['annualized_sharpe']:.2f}")
-                print(f"    - 平均每笔收益率: {sharpe_on_capital['mean_return_per_trade']*100:.4f}%")
-                print(f"    - 收益率标准差: {sharpe_on_capital['std_dev']*100:.4f}%")
-                print(f"    - 分析交易数: {sharpe_on_capital['total_trades']}")
             else:
                 results["sharpe_on_capital"] = {
                     "sharpe_ratio": 0,
@@ -755,20 +711,14 @@ class ApexCalculator:
                     "std_dev": 0,
                     "total_trades": 0
                 }
-                print(f"  ⚠ Sharpe Ratio (基于真实本金): 数据不足")
 
             # 指标11: 基于真实本金的 Max Drawdown（推荐方法）
             if fills and len(fills) > 1:
-                print(f"\n📉 计算 Max Drawdown（基于真实本金）:")
                 max_dd_on_capital = self.calculate_max_drawdown_on_capital(
                     fills=fills,
                     true_capital=capital_info['true_capital']
                 )
                 results["max_drawdown_on_capital"] = max_dd_on_capital
-                print(f"  ✓ 最大回撤: {max_dd_on_capital['max_drawdown_pct']:.2f}%")
-                print(f"    - 峰值累计收益率: {max_dd_on_capital['peak_return']:.2f}%")
-                print(f"    - 谷底累计收益率: {max_dd_on_capital['trough_return']:.2f}%")
-                print(f"    - 分析交易数: {max_dd_on_capital['total_trades']}")
             else:
                 results["max_drawdown_on_capital"] = {
                     "max_drawdown_pct": 0,
@@ -776,11 +726,6 @@ class ApexCalculator:
                     "trough_return": 0,
                     "total_trades": 0
                 }
-                print(f"  ⚠ Max Drawdown (基于真实本金): 数据不足")
-
-            print(f"\n{'='*60}")
-            print("✅ 分析完成!")
-            print(f"{'='*60}")
 
             return results
 
@@ -875,29 +820,36 @@ class ApexCalculator:
         }
 
     def calculate_return_metrics(self, current_value: float, true_capital: float,
+                                 total_cumulative_pnl: float,
                                  first_trade_time: int, last_trade_time: int) -> Dict[str, float]:
         """
-        计算累计收益率和年化收益率
+        计算累计收益率和年化收益率（统一使用累计总盈亏）
 
         参数：
-            current_value: 当前总账户价值
+            current_value: 当前总账户价值（用于参考）
             true_capital: 真实本金（充值 - 提现）
+            total_cumulative_pnl: 累计总盈亏（已实现+未实现）
             first_trade_time: 第一笔交易时间戳（毫秒）
             last_trade_time: 最后一笔交易时间戳（毫秒）
 
         返回：
             字典，包含：
-            - cumulative_return: 累计收益率（百分比）
+            - cumulative_return: 累计收益率（百分比，基于交易盈亏）
             - annualized_return: 年化收益率（百分比）
-            - net_profit: 净盈利（美元）
+            - net_profit_trading: 交易净盈利（美元，基于累计总盈亏）
+            - net_profit_account: 账户净增长（美元，基于账户价值）
             - trading_days: 交易天数
+            - annualized_return_valid: 年化收益率是否可靠
         """
-        # 计算净盈利
-        net_profit = current_value - true_capital
+        # 使用累计总盈亏作为主要净盈利指标（统一口径）
+        net_profit_trading = total_cumulative_pnl
 
-        # 计算累计收益率
+        # 计算账户净增长（作为参考）
+        net_profit_account = current_value - true_capital
+
+        # 计算累计收益率（基于交易盈亏）
         if true_capital > 0:
-            cumulative_return = (net_profit / true_capital) * 100
+            cumulative_return = (net_profit_trading / true_capital) * 100
         else:
             cumulative_return = 0.0
 
@@ -907,18 +859,35 @@ class ApexCalculator:
         else:
             trading_days = 0.0
 
-        # 计算年化收益率
+        # 计算年化收益率（添加合理性检查）
+        annualized_return = 0.0
+        annualized_return_valid = True
+
         if trading_days > 0 and true_capital > 0:
             # 年化收益率 = ((1 + 累计收益率) ^ (365 / 交易天数) - 1) × 100%
             annual_factor = 365.0 / trading_days
-            annualized_return = (math.pow(1 + cumulative_return / 100, annual_factor) - 1) * 100
-        else:
-            annualized_return = 0.0
+
+            # 对于交易天数较短的情况，年化收益率可能不具参考意义
+            if trading_days < 30:
+                annualized_return_valid = False
+                annualized_return = 0.0  # 不显示年化收益率
+            else:
+                try:
+                    annualized_return = (math.pow(1 + cumulative_return / 100, annual_factor) - 1) * 100
+
+                    # 如果年化收益率过大（>10000%），标记为不可靠
+                    if abs(annualized_return) > 10000:
+                        annualized_return_valid = False
+                except (OverflowError, ValueError):
+                    annualized_return = 0.0
+                    annualized_return_valid = False
 
         return {
             "cumulative_return": cumulative_return,
             "annualized_return": annualized_return,
-            "net_profit": net_profit,
+            "annualized_return_valid": annualized_return_valid,
+            "net_profit_trading": net_profit_trading,  # 主要指标：基于交易盈亏
+            "net_profit_account": net_profit_account,  # 参考指标：账户净增长
             "trading_days": trading_days
         }
 
@@ -1111,6 +1080,8 @@ class ApexCalculator:
             - max_drawdown_pct: 最大回撤百分比
             - peak_return: 峰值累计收益率（百分比）
             - trough_return: 谷底累计收益率（百分比）
+            - peak_date: 峰值发生日期
+            - trough_date: 谷底发生日期
             - total_trades: 分析的交易数量
 
         算法说明：
@@ -1136,12 +1107,15 @@ class ApexCalculator:
                 "max_drawdown_pct": 0,
                 "peak_return": 0,
                 "trough_return": 0,
+                "peak_date": "N/A",
+                "trough_date": "N/A",
                 "total_trades": 0
             }
 
         trade_returns = []
+        trade_times = []  # 记录每笔交易的时间戳
 
-        # 提取每笔平仓交易的收益率
+        # 提取每笔平仓交易的收益率和时间
         for fill in fills:
             closed_pnl = float(fill.get('closedPnl', 0))
 
@@ -1157,6 +1131,7 @@ class ApexCalculator:
             # 10.0 = 1000%（合理的最大盈利上限）
             trade_return = max(-0.99, min(trade_return, 10.0))
             trade_returns.append(trade_return)
+            trade_times.append(fill.get('time', 0))  # 记录时间戳
 
         # 数据不足时返回零值
         if len(trade_returns) < 2:
@@ -1164,6 +1139,8 @@ class ApexCalculator:
                 "max_drawdown_pct": 0,
                 "peak_return": 0,
                 "trough_return": 0,
+                "peak_date": "N/A",
+                "trough_date": "N/A",
                 "total_trades": 0
             }
 
@@ -1203,112 +1180,49 @@ class ApexCalculator:
         # 限制最大回撤不超过100%
         max_drawdown = min(max_drawdown, 100.0)
 
+        # 格式化日期
+        from datetime import datetime
+
+        def format_date(timestamp_ms: int) -> str:
+            """将毫秒时间戳转换为日期字符串"""
+            if timestamp_ms > 0:
+                try:
+                    dt = datetime.fromtimestamp(timestamp_ms / 1000)
+                    return dt.strftime('%Y-%m-%d')
+                except:
+                    return "N/A"
+            return "N/A"
+
+        peak_date = format_date(trade_times[peak_index])
+        trough_date = format_date(trade_times[trough_index])
+
         return {
             "max_drawdown_pct": max_drawdown,
             "peak_return": (peak - 1) * 100,  # 转换为百分比
             "trough_return": (trough_value - 1) * 100,
+            "peak_date": peak_date,
+            "trough_date": trough_date,
             "total_trades": len(trade_returns)
         }
 
 
 def main():
-    """
-    主程序入口 - Hyperliquid交易分析示例
-
-    演示如何使用ApexCalculator类分析用户交易表现
-    """
-    print("=" * 70)
-    print("📊 Apex Liquid Bot 交易分析计算器")
-    print("=" * 70)
-    print("基于: Hyperliquid官方API + Apex Liquid Bot算法")
-    print()
-
-    # 初始化计算器
+    """主程序入口 - Hyperliquid交易分析示例"""
     calculator = ApexCalculator()
+    user_address = "0x7717a7a245d9f950e586822b8c9b46863ed7bd7e"  # 示例地址
 
-    # 示例用户地址（请替换为真实地址）
-    user_address = "0x7717a7a245d9f950e586822b8c9b46863ed7bd7e"
-
-    print("💡 使用说明:")
-    print("   请提供有效的Hyperliquid用户钱包地址进行分析")
-    print("   地址格式示例: 0x1234567890123456789012345678901234567890")
-    print()
-
-    # 验证地址格式
     if calculator.api_client.validate_user_address(user_address):
-        print(f"✓ 地址格式验证通过: {user_address}")
-        print(f"→ 开始分析...\n")
-
         try:
-            # 执行完整交易分析
             results = calculator.analyze_user(user_address, force_refresh=True)
-
-            # 检查是否有错误
             if "error" not in results:
-                print("\n" + "=" * 70)
-                print("📈 分析结果摘要")
-                print("=" * 70)
-                print(f"用户地址: {results['user_address']}")
-                print(f"分析时间: {results['analysis_timestamp']}")
-                print()
-
-                # 数据摘要
-                data_summary = results.get('data_summary', {})
-                print("📦 数据摘要:")
-                print(f"  • 成交记录: {data_summary.get('total_fills', 0)} 条")
-                print(f"  • 当前持仓: {data_summary.get('total_positions', 0)} 个")
-                print(f"  • 账户价值: ${data_summary.get('account_value', 0):,.2f}")
-                print(f"  • 已用保证金: ${data_summary.get('total_margin_used', 0):,.2f}")
-                print()
-
-                # 关键指标
-                print("🎯 关键指标:")
-                print(f"  • Profit Factor（盈亏因子）: {results.get('profit_factor', 0)}")
-                print(f"  • Sharpe Ratio（夏普比率）: {results.get('sharpe_ratio', 0):.4f}")
-                max_dd_on_capital = results.get('max_drawdown_on_capital', {})
-                print(f"  • Max Drawdown（最大回撤）: {max_dd_on_capital.get('max_drawdown_pct', 0):.2f}%")
-
-                win_rate = results.get('win_rate', {})
-                print(f"  • Win Rate（胜率）: {win_rate.get('winRate', 0):.2f}%")
-                print(f"  • Direction Bias（方向偏好）: {win_rate.get('bias', 50):.2f}%")
-                print(f"  • Total Trades（总交易次数）: {win_rate.get('totalTrades', 0)}")
-
-                hold_stats = results.get('hold_time_stats', {})
-                print(f"  • Avg Hold Time（平均持仓时间）: {hold_stats.get('allTimeAverage', 0):.2f} 天")
-
-                position_analysis = results.get('position_analysis', {})
-                print(f"  • Current Positions（当前持仓）: {position_analysis.get('total_positions', 0)}")
-                print(f"  • Unrealized PnL（未实现盈亏）: ${position_analysis.get('total_unrealized_pnl', 0):.2f}")
-
-                print("\n" + "=" * 70)
-                print("✅ 分析完成!")
-                print("=" * 70)
-
+                print(f"✅ 分析成功: {user_address}")
+                return results
             else:
-                print(f"\n✗ 分析失败: {results['error']}")
-
+                print(f"❌ 分析失败: {results['error']}")
         except Exception as e:
-            print(f"\n✗ 分析过程中发生错误: {e}")
-            print("\n🔍 故障排查:")
-            print("  1. 检查网络连接是否正常")
-            print("  2. 确认用户地址是否正确")
-            print("  3. 验证Hyperliquid API是否可访问")
-            print("  4. 查看是否存在防火墙或代理限制")
-
+            print(f"❌ 错误: {e}")
     else:
-        print(f"✗ 地址格式无效: {user_address}")
-        print("⚠ 请提供有效的以太坊地址格式（0x开头，42位十六进制字符）")
-
-    print("\n" + "=" * 70)
-    print("📖 使用说明")
-    print("=" * 70)
-    print("1. 将代码中的 user_address 替换为真实的Hyperliquid用户地址")
-    print("2. 确保网络连接正常，可以访问Hyperliquid API")
-    print("3. 运行脚本即可获取完整的交易分析报告")
-    print("\n📚 参考文档:")
-    print("   Hyperliquid API: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api")
-    print("   Apex Liquid Bot: https://apexliquid.bot/")
-    print("=" * 70)
+        print(f"❌ 地址格式无效: {user_address}")
 
 
 if __name__ == "__main__":

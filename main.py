@@ -48,16 +48,56 @@ class AnalysisResults:
     raw_results: Dict[str, Any]
 
 # ========== 输出格式化 ==========
-def print_section(title: str, char: str = "=") -> None:
+def print_section(title: str, char: str = "=", width: int = 80) -> None:
     """打印分隔线"""
-    line = char * 70
+    line = char * width
     print(f"\n{line}")
     print(f"{title}")
     print(f"{line}")
 
-def print_metric(label: str, value: str, icon: str = "  •") -> None:
+def print_metric(label: str, value: str, icon: str = "  •", indent: int = 0) -> None:
     """打印指标"""
-    print(f"{icon} {label}: {value}")
+    prefix = " " * indent
+    print(f"{prefix}{icon} {label}: {value}")
+
+def print_table_row(items: list, widths: list, align: list = None) -> None:
+    """打印表格行
+
+    Args:
+        items: 要显示的项目列表
+        widths: 每列的宽度列表
+        align: 对齐方式列表 ('left', 'right', 'center')，默认左对齐
+    """
+    if align is None:
+        align = ['left'] * len(items)
+
+    row = []
+    for item, width, al in zip(items, widths, align):
+        if al == 'right':
+            row.append(str(item).rjust(width))
+        elif al == 'center':
+            row.append(str(item).center(width))
+        else:
+            row.append(str(item).ljust(width))
+
+    print("  " + " │ ".join(row))
+
+def print_table_separator(widths: list, style: str = 'mid') -> None:
+    """打印表格分隔线
+
+    Args:
+        widths: 每列的宽度列表
+        style: 分隔线样式 ('top', 'mid', 'bottom')
+    """
+    chars = {
+        'top': ('┌', '┬', '┐', '─'),
+        'mid': ('├', '┼', '┤', '─'),
+        'bottom': ('└', '┴', '┘', '─')
+    }
+    left, mid, right, line = chars.get(style, chars['mid'])
+
+    parts = [line * w for w in widths]
+    print("  " + left + mid.join(parts) + right)
 
 # ========== 数据提取 ==========
 def extract_analysis_data(calculator: ApexCalculator, results: Dict[str, Any],
@@ -101,42 +141,65 @@ def extract_analysis_data(calculator: ApexCalculator, results: Dict[str, Any],
 # ========== 输出模块 ==========
 def display_header() -> None:
     """显示程序头部信息"""
-    print("🚀 Apex Fork - 交易分析系统")
-    print("基于Hyperliquid官方API和Apex Liquid Bot算法")
-    print("✅ 完全不受出入金影响的准确指标")
-    print("=" * 70)
+    width = 80
+    print("\n" + "=" * width)
+    print("🚀 Apex Fork - 交易分析系统".center(width - 2))
+    print("基于Hyperliquid官方API和Apex Liquid Bot算法".center(width + 14))  # 调整中文字符
+    print("✅ 完全不受出入金影响的准确指标".center(width + 8))
+    print("=" * width)
 
 def display_core_metrics(analysis: AnalysisResults) -> None:
     """显示核心指标（交易级别）"""
-    print_section("📈 核心指标（交易级别 - 完全不受出入金影响）")
+    print_section("📈 核心指标（交易级别 - 完全不受出入金影响）", width=80)
 
     # Sharpe Ratio - 基于真实本金
     sharpe_on_capital = analysis.raw_results.get('sharpe_on_capital', {})
     if sharpe_on_capital and sharpe_on_capital.get('total_trades', 0) > 0:
-        print("\n✅ Sharpe Ratio (基于真实本金):")
-        print_metric("年化 Sharpe", f"{sharpe_on_capital['annualized_sharpe']:.2f}")
-        print_metric("每笔 Sharpe", f"{sharpe_on_capital['sharpe_ratio']:.4f}")
-        print_metric("平均每笔收益率", f"{sharpe_on_capital['mean_return_per_trade']:.4%}")
-        print_metric("收益率标准差", f"{sharpe_on_capital['std_dev']:.4%}")
+        print("\n  ┌─ Sharpe Ratio（基于真实本金）")
+        print("  │")
 
-        # 解读
+        # 表格显示 Sharpe 指标
+        widths = [28, 18, 28]
+        print_table_separator(widths, 'top')
+        print_table_row(['指标', '数值', '说明'], widths)
+        print_table_separator(widths, 'mid')
+
         sharpe_val = sharpe_on_capital['annualized_sharpe']
         if sharpe_val > 1:
-            interpretation = "✅ 优秀的风险调整收益"
+            rating = "✅ 优秀"
         elif sharpe_val > 0:
-            interpretation = "⚠️  正收益但风险较高"
+            rating = "⚠️  偏高风险"
         else:
-            interpretation = "❌ 负的风险调整收益"
-        print_metric("评级", interpretation, icon="  →")
+            rating = "❌ 负收益"
+
+        print_table_row(
+            ['年化 Sharpe Ratio', f"{sharpe_val:.2f}", rating],
+            widths, ['left', 'right', 'left']
+        )
+        print_table_row(
+            ['每笔 Sharpe', f"{sharpe_on_capital['sharpe_ratio']:.4f}", '单笔风险调整收益'],
+            widths, ['left', 'right', 'left']
+        )
+        print_table_row(
+            ['平均每笔收益率', f"{sharpe_on_capital['mean_return_per_trade']:.2%}", '相对真实本金'],
+            widths, ['left', 'right', 'left']
+        )
+        print_table_row(
+            ['收益率标准差', f"{sharpe_on_capital['std_dev']:.2%}", '波动性指标'],
+            widths, ['left', 'right', 'left']
+        )
+        print_table_separator(widths, 'bottom')
 
     # Max Drawdown
     trade_dd = analysis.trade_dd
-    print("\n✅ Max Drawdown (交易级别):")
-    print_metric("最大回撤", f"{trade_dd['max_drawdown_pct']:.2f}%")
-    print_metric("峰值累计收益", f"{trade_dd['peak_return']:.2f}%")
-    print_metric("谷底累计收益", f"{trade_dd['trough_return']:.2f}%")
+    print("\n  ┌─ Max Drawdown（最大回撤）")
+    print("  │")
 
-    # 风险评级
+    widths = [28, 18, 28]
+    print_table_separator(widths, 'top')
+    print_table_row(['指标', '数值', '风险等级/说明'], widths)
+    print_table_separator(widths, 'mid')
+
     dd_pct = trade_dd['max_drawdown_pct']
     if dd_pct < 20:
         risk_level = "🟢 低风险"
@@ -144,19 +207,64 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
         risk_level = "🟡 中等风险"
     else:
         risk_level = "🔴 高风险"
-    print_metric("风险等级", risk_level, icon="  →")
+
+    print_table_row(
+        ['最大回撤', f"{dd_pct:.2f}%", risk_level],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['峰值累计收益', f"{trade_dd['peak_return']:.2f}%", f"历史最高点"],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['峰值日期', trade_dd.get('peak_date', 'N/A'), '峰值发生时间'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['谷底累计收益', f"{trade_dd['trough_return']:.2f}%", '回撤最低点'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['谷底日期', trade_dd.get('trough_date', 'N/A'), '谷底发生时间'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_separator(widths, 'bottom')
 
     # 交易统计
-    print("\n✅ 交易统计:")
-    print_metric("Profit Factor", f"{analysis.profit_factor:.4f}")
-    print_metric("Win Rate", f"{analysis.win_rate_data.get('winRate', 0):.2f}%")
-    print_metric("Direction Bias", f"{analysis.win_rate_data.get('bias', 0):.2f}%")
-    print_metric("Total Trades", f"{analysis.win_rate_data.get('totalTrades', 0)}")
-    print_metric("Avg Hold Time", f"{analysis.hold_time_stats.get('allTimeAverage', 0):.2f} 天")
+    print("\n  ┌─ 交易统计")
+    print("  │")
+
+    widths = [28, 18, 28]
+    print_table_separator(widths, 'top')
+    print_table_row(['指标', '数值', '说明'], widths)
+    print_table_separator(widths, 'mid')
+
+    print_table_row(
+        ['Profit Factor', f"{analysis.profit_factor:.4f}",
+         '✅ 盈利' if analysis.profit_factor > 1 else '❌ 亏损'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['Win Rate', f"{analysis.win_rate_data.get('winRate', 0):.2f}%", '胜率'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['Direction Bias', f"{analysis.win_rate_data.get('bias', 0):.2f}%", '方向偏好（做多/做空）'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['Total Trades', f"{analysis.win_rate_data.get('totalTrades', 0)}", '总交易次数'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['Avg Hold Time', f"{analysis.hold_time_stats.get('allTimeAverage', 0):.2f} 天", '平均持仓时长'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_separator(widths, 'bottom')
 
 def display_account_info(analysis: AnalysisResults) -> None:
     """显示账户信息"""
-    print_section("💰 账户信息")
+    print_section("💰 账户信息", width=80)
 
     data_summary = analysis.data_summary
     position_analysis = analysis.position_analysis
@@ -167,47 +275,94 @@ def display_account_info(analysis: AnalysisResults) -> None:
     perp_account_value = data_summary.get('perp_account_value', 0)
     spot_account_value = data_summary.get('spot_account_value', 0)
 
-    print_metric("总账户价值", f"${total_account_value:,.2f}")
-    print_metric("  ├─ Perp 账户价值", f"${perp_account_value:,.2f}")
-    print_metric("  └─ Spot 账户价值", f"${spot_account_value:,.2f}")
-    print_metric("Margin Used", f"${data_summary.get('total_margin_used', 0):,.2f}")
-    print_metric("Current Positions", f"{position_analysis.get('total_positions', 0)}")
+    print("\n  ┌─ 账户价值")
+    print("  │")
+    print(f"  │  总账户价值          ${total_account_value:>12,.2f}")
+    print(f"  │  ├─ Perp 账户        ${perp_account_value:>12,.2f}")
+    print(f"  │  └─ Spot 账户        ${spot_account_value:>12,.2f}")
+    print("  │")
+    print(f"  │  保证金使用          ${data_summary.get('total_margin_used', 0):>12,.2f}")
+    print(f"  │  当前持仓            {position_analysis.get('total_positions', 0):>12} 个")
 
     # PNL信息
-    print("\n盈亏统计:")
     total_cumulative_pnl = raw_results.get('total_cumulative_pnl', 0)
     total_realized_pnl = raw_results.get('total_realized_pnl', 0)
     total_unrealized_pnl = position_analysis.get('total_unrealized_pnl', 0)
 
-    print_metric("累计总盈亏", f"${total_cumulative_pnl:,.2f}")
-    print_metric("  ├─ 已实现盈亏", f"${total_realized_pnl:,.2f}")
-    print_metric("  └─ 未实现盈亏", f"${total_unrealized_pnl:,.2f}")
+    pnl_icon = "📈" if total_cumulative_pnl >= 0 else "📉"
+    print(f"\n  ┌─ 盈亏统计 {pnl_icon}")
+    print("  │")
+    print(f"  │  累计总盈亏          ${total_cumulative_pnl:>12,.2f}")
+    print(f"  │  ├─ 已实现盈亏      ${total_realized_pnl:>12,.2f}")
+    print(f"  │  └─ 未实现盈亏      ${total_unrealized_pnl:>12,.2f}")
 
     # 本金和收益率信息
-    print("\n本金与收益率 (算法2: 完整版本):")
     capital_info = raw_results.get('capital_info', {})
     return_metrics = raw_results.get('return_metrics', {})
 
-    print_metric("真实本金", f"${capital_info.get('true_capital', 0):,.2f}")
-    print_metric("  ├─ 总充值", f"${capital_info.get('total_deposits', 0):,.2f}")
-    print_metric("  ├─ 总提现", f"-${capital_info.get('total_withdrawals', 0):,.2f}")
-    print_metric("  ├─ 外部转入 Spot", f"+${capital_info.get('external_to_spot', 0):,.2f}")
-    print_metric("  └─ 外部转出", f"-${capital_info.get('external_out', 0):,.2f}")
-    print("\n")
-    print_metric("累计收益率", f"{return_metrics.get('cumulative_return', 0):.2f}%")
-    print_metric("年化收益率", f"{return_metrics.get('annualized_return', 0):.2f}%")
-    print_metric("  ├─ 净盈利", f"${return_metrics.get('net_profit', 0):,.2f}")
-    print_metric("  └─ 交易天数", f"{return_metrics.get('trading_days', 0):.1f} 天")
+    print(f"\n  ┌─ 本金与收益率（算法2: 完整版本）")
+    print("  │")
+    print(f"  │  真实本金            ${capital_info.get('true_capital', 0):>12,.2f}")
+    print(f"  │  ├─ 总充值          ${capital_info.get('total_deposits', 0):>12,.2f}")
+    print(f"  │  ├─ 总提现         -${capital_info.get('total_withdrawals', 0):>12,.2f}")
+    print(f"  │  ├─ 外部转入 Spot  +${capital_info.get('external_to_spot', 0):>12,.2f}")
+    print(f"  │  └─ 外部转出       -${capital_info.get('external_out', 0):>12,.2f}")
+    print("  │")
+
+    cumulative_return = return_metrics.get('cumulative_return', 0)
+    return_icon = "📈" if cumulative_return >= 0 else "📉"
+    print(f"  │  累计收益率 {return_icon}       {cumulative_return:>12.2f}%")
+
+    # 年化收益率显示（始终显示值）
+    annualized_return = return_metrics.get('annualized_return', 0)
+    trading_days = return_metrics.get('trading_days', 0)
+    if trading_days < 30:
+        print(f"  │  年化收益率 ⚠️       {annualized_return:>12.2f}%  (⚠️ 交易天数<30天,仅供参考)")
+    else:
+        print(f"  │  年化收益率          {annualized_return:>12.2f}%")
+
+    print("  │")
+    print(f"  │  ├─ 交易净盈利      ${return_metrics.get('net_profit_trading', 0):>12,.2f}  (基于累计总盈亏)")
+    print(f"  │  ├─ 账户净增长      ${return_metrics.get('net_profit_account', 0):>12,.2f}  (当前价值-本金)")
+    print(f"  │  └─ 交易天数        {return_metrics.get('trading_days', 0):>12.1f}  天")
+
+    # 显示差异说明
+    diff = return_metrics.get('net_profit_account', 0) - return_metrics.get('net_profit_trading', 0)
+    if abs(diff) > 1:
+        print("  │")
+        print(f"  │  ℹ️  差异说明:       ${diff:>12,.2f}  (可能包含 funding fee、空投等)")
 
 def display_hold_time_stats(analysis: AnalysisResults) -> None:
     """显示持仓时间统计"""
-    print_section("⏱️  持仓时间统计")
+    print_section("⏱️  持仓时间统计", width=80)
 
     stats = analysis.hold_time_stats
-    print_metric("今日平均", f"{stats.get('todayCount', 0):.2f} 天")
-    print_metric("近7天平均", f"{stats.get('last7DaysAverage', 0):.2f} 天")
-    print_metric("近30天平均", f"{stats.get('last30DaysAverage', 0):.2f} 天")
-    print_metric("历史平均", f"{stats.get('allTimeAverage', 0):.2f} 天")
+
+    print("\n  ┌─ 平均持仓时长")
+    print("  │")
+
+    widths = [28, 18, 28]
+    print_table_separator(widths, 'top')
+    print_table_row(['时间段', '平均持仓', '说明'], widths)
+    print_table_separator(widths, 'mid')
+
+    print_table_row(
+        ['今日', f"{stats.get('todayCount', 0):.2f} 天", '当日交易'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['近 7 天', f"{stats.get('last7DaysAverage', 0):.2f} 天", '最近一周'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['近 30 天', f"{stats.get('last30DaysAverage', 0):.2f} 天", '最近一月'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_row(
+        ['历史平均', f"{stats.get('allTimeAverage', 0):.2f} 天", '全部交易历史'],
+        widths, ['left', 'right', 'left']
+    )
+    print_table_separator(widths, 'bottom')
 
 def display_data_summary(analysis: AnalysisResults) -> None:
     """显示数据摘要"""
@@ -278,17 +433,20 @@ def display_strategy_evaluation(analysis: AnalysisResults) -> None:
 
 def display_usage_guide() -> None:
     """显示使用说明"""
-    print_section("📚 使用说明")
-    print("1. 将 user_address 替换为真实的Hyperliquid用户地址")
-    print("2. 确保网络连接正常")
-    print("3. 推荐使用交易级别指标（不受出入金影响）")
-    print("4. 使用 --report 参数生成 Markdown 报告")
-    print("5. 使用 --verbose 显示详细日志")
-    print("6. 使用 --debug 显示调试信息")
-    print("\n🔗 相关链接:")
-    print("  • API文档: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api")
-    print("  • 项目地址: https://github.com/your-repo/apex-fork")
-    print("=" * 70)
+    print_section("📚 使用说明", width=80)
+
+    print("\n  使用步骤:")
+    print("    1. 将 user_address 替换为真实的 Hyperliquid 用户地址")
+    print("    2. 确保网络连接正常")
+    print("    3. 推荐使用交易级别指标（不受出入金影响）")
+    print("    4. 使用 --report 参数生成 Markdown 报告")
+    print("    5. 使用 --verbose 显示详细日志")
+    print("    6. 使用 --debug 显示调试信息")
+
+    print("\n  🔗 相关链接:")
+    print("    • API 文档: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api")
+    print("    • 项目地址: https://github.com/your-repo/apex-fork")
+    print("\n" + "=" * 80)
 
 # ========== 主程序 ==========
 def analyze_user_trading(user_address: str, force_refresh: bool = False,
@@ -304,8 +462,9 @@ def analyze_user_trading(user_address: str, force_refresh: bool = False,
         bool: 分析是否成功
     """
     try:
-        print(f"\n📊 分析用户: {user_address}")
-        print("=" * 70)
+        print(f"\n{'=' * 80}")
+        print(f"📊 分析用户: {user_address}")
+        print("=" * 80)
 
         # 初始化计算器
         calculator = ApexCalculator()
@@ -332,13 +491,12 @@ def analyze_user_trading(user_address: str, force_refresh: bool = False,
 
         # 生成报告（可选）
         if generate_report:
-            print("\n")
-            print_section("📄 生成 Markdown 报告")
+            print_section("📄 生成 Markdown 报告", width=80)
             report_filename = f"trading_report_{user_address[:8]}.md"
             save_result = generate_markdown_report(results, user_address, report_filename)
-            print(f"\n{save_result}")
-            print(f"💡 提示: 使用 Markdown 查看器打开报告文件")
-            print("=" * 70)
+            print(f"\n  {save_result}")
+            print(f"  💡 提示: 使用 Markdown 查看器打开报告文件")
+            print("\n" + "=" * 80)
 
         return True
 
