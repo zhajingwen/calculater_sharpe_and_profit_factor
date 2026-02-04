@@ -46,6 +46,7 @@ class AddressMetrics:
     short_positions: int = 0
     total_positions: int = 0
     position_bias: str = "中性"
+    total_position_value: float = 0.0
 
     # 持仓时间
     avg_hold_time: float = 0.0
@@ -121,6 +122,7 @@ def extract_metrics_from_result(result: Dict[str, Any], address: str) -> Address
         short_positions=position_analysis.get('short_positions', 0),
         total_positions=position_analysis.get('total_positions', 0),
         position_bias=position_analysis.get('position_bias', '中性'),
+        total_position_value=position_analysis.get('total_position_value', 0),
 
         # 持仓时间
         avg_hold_time=hold_time_stats.get('allTimeAverage', 0),
@@ -210,24 +212,42 @@ def generate_html_report(
         table_data.append({
             'rank': m.rank,
             'address': m.address,
+            # 核心交易指标
             'total_trades': m.total_trades,
             'win_rate': m.win_rate,
             'sharpe_ratio': m.sharpe_ratio,
             'profit_factor': m.profit_factor,
+            # 盈亏指标
             'total_pnl': m.total_pnl,
+            'total_realized_pnl': m.total_realized_pnl,
+            'total_unrealized_pnl': m.total_unrealized_pnl,
+            # 账户信息
             'account_value': m.account_value,
+            'perp_account_value': m.perp_account_value,
+            'spot_account_value': m.spot_account_value,
+            'total_margin_used': m.total_margin_used,
+            # 收益率指标
             'mean_return': m.mean_return * 100,  # 转为百分比
             'std_return': m.std_return * 100,
+            'trades_per_year': m.trades_per_year,
+            'trading_days': m.trading_days,
+            # 方向偏好
             'bias': m.bias,
+            'long_positions': m.long_positions,
+            'short_positions': m.short_positions,
+            'total_positions': m.total_positions,
+            'position_bias': m.position_bias,
+            'total_position_value': m.total_position_value,
+            # 持仓时间
             'avg_hold_time': m.avg_hold_time,
+            'hold_time_today': m.hold_time_today,
+            'hold_time_7d': m.hold_time_7d,
+            'hold_time_30d': m.hold_time_30d,
+            # ROE 指标
             'roe_24h': m.roe_24h,
             'roe_7d': m.roe_7d,
             'roe_30d': m.roe_30d,
             'roe_all': m.roe_all,
-            'total_positions': m.total_positions,
-            'trading_days': m.trading_days,
-            'total_realized_pnl': m.total_realized_pnl,
-            'total_unrealized_pnl': m.total_unrealized_pnl,
         })
 
     # 统计信息
@@ -519,6 +539,32 @@ def generate_html_report(
             color: var(--accent-cyan);
         }}
 
+        .column-menu-buttons {{
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+
+        .column-menu-btn {{
+            flex: 1;
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+
+        .column-menu-btn:hover {{
+            background: var(--accent-cyan);
+            color: var(--bg-primary);
+            border-color: var(--accent-cyan);
+        }}
+
         @media (max-width: 768px) {{
             .stats-grid {{
                 grid-template-columns: repeat(2, 1fr);
@@ -604,26 +650,45 @@ def generate_html_report(
 
         // 列定义
         const columns = [
+            // 基础信息
             {{ key: 'rank', label: '#', format: v => v, defaultVisible: true }},
             {{ key: 'address', label: '地址', format: v => v, defaultVisible: true, isAddress: true }},
+            // 核心交易指标
             {{ key: 'total_trades', label: '交易数', format: v => v.toLocaleString(), defaultVisible: true }},
             {{ key: 'win_rate', label: '胜率', format: v => v.toFixed(1) + '%', defaultVisible: true }},
             {{ key: 'sharpe_ratio', label: '夏普比率', format: v => v.toFixed(2), defaultVisible: true, colorByValue: true }},
             {{ key: 'profit_factor', label: '盈利因子', format: v => v >= 1000 ? '∞' : v.toFixed(2), defaultVisible: true, colorByValue: true, threshold: 1 }},
+            // 盈亏指标
             {{ key: 'total_pnl', label: '总PNL', format: v => formatCurrency(v), defaultVisible: true, colorByValue: true, isCurrency: true }},
+            {{ key: 'total_realized_pnl', label: '已实现PNL', format: v => formatCurrency(v), defaultVisible: false, colorByValue: true, isCurrency: true }},
+            {{ key: 'total_unrealized_pnl', label: '未实现PNL', format: v => formatCurrency(v), defaultVisible: false, colorByValue: true, isCurrency: true }},
+            // 账户信息
             {{ key: 'account_value', label: '账户价值', format: v => formatCurrency(v), defaultVisible: true, isCurrency: true }},
+            {{ key: 'perp_account_value', label: 'Perp账户', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true }},
+            {{ key: 'spot_account_value', label: 'Spot账户', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true }},
+            {{ key: 'total_margin_used', label: '保证金使用', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true }},
+            // 收益率指标
             {{ key: 'mean_return', label: '平均收益率', format: v => v.toFixed(2) + '%', defaultVisible: true, colorByValue: true }},
             {{ key: 'std_return', label: '收益率标准差', format: v => v.toFixed(2) + '%', defaultVisible: false }},
-            {{ key: 'bias', label: '方向偏好', format: v => v.toFixed(1) + '%', defaultVisible: false }},
+            {{ key: 'trades_per_year', label: '年交易频率', format: v => v.toFixed(0), defaultVisible: false }},
+            {{ key: 'trading_days', label: '交易天数', format: v => v.toFixed(1), defaultVisible: false }},
+            // 方向偏好
+            {{ key: 'bias', label: '方向偏好%', format: v => v.toFixed(1) + '%', defaultVisible: false }},
+            {{ key: 'position_bias', label: '仓位偏好', format: v => v, defaultVisible: false }},
+            {{ key: 'long_positions', label: '多头持仓', format: v => v, defaultVisible: false }},
+            {{ key: 'short_positions', label: '空头持仓', format: v => v, defaultVisible: false }},
+            {{ key: 'total_positions', label: '当前持仓数', format: v => v, defaultVisible: false }},
+            {{ key: 'total_position_value', label: '持仓总价值', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true }},
+            // 持仓时间
             {{ key: 'avg_hold_time', label: '平均持仓时间', format: v => formatHoldTime(v), defaultVisible: true }},
+            {{ key: 'hold_time_today', label: '今日持仓时间', format: v => formatHoldTime(v), defaultVisible: false }},
+            {{ key: 'hold_time_7d', label: '7天持仓时间', format: v => formatHoldTime(v), defaultVisible: false }},
+            {{ key: 'hold_time_30d', label: '30天持仓时间', format: v => formatHoldTime(v), defaultVisible: false }},
+            // ROE 指标
             {{ key: 'roe_24h', label: 'ROE(24h)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: true, colorByValue: true }},
             {{ key: 'roe_7d', label: 'ROE(7d)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: false, colorByValue: true }},
             {{ key: 'roe_30d', label: 'ROE(30d)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: false, colorByValue: true }},
             {{ key: 'roe_all', label: 'ROE(历史)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: false, colorByValue: true }},
-            {{ key: 'total_positions', label: '当前持仓', format: v => v, defaultVisible: false }},
-            {{ key: 'trading_days', label: '交易天数', format: v => v.toFixed(1), defaultVisible: false }},
-            {{ key: 'total_realized_pnl', label: '已实现PNL', format: v => formatCurrency(v), defaultVisible: false, colorByValue: true, isCurrency: true }},
-            {{ key: 'total_unrealized_pnl', label: '未实现PNL', format: v => formatCurrency(v), defaultVisible: false, colorByValue: true, isCurrency: true }},
         ];
 
         // 可见列
@@ -755,6 +820,36 @@ def generate_html_report(
             const menu = document.getElementById('columnMenu');
             menu.innerHTML = '';
 
+            // 添加全选/取消全选按钮
+            const btnContainer = document.createElement('div');
+            btnContainer.className = 'column-menu-buttons';
+
+            const selectAllBtn = document.createElement('button');
+            selectAllBtn.className = 'column-menu-btn';
+            selectAllBtn.textContent = '全选';
+            selectAllBtn.addEventListener('click', () => {{
+                visibleColumns = columns.map(c => c.key);
+                renderHeader();
+                sortTable(currentSort.key);
+                renderColumnMenu();
+            }});
+
+            const deselectAllBtn = document.createElement('button');
+            deselectAllBtn.className = 'column-menu-btn';
+            deselectAllBtn.textContent = '取消全选';
+            deselectAllBtn.addEventListener('click', () => {{
+                // 保留基础列：排名和地址
+                visibleColumns = ['rank', 'address'];
+                renderHeader();
+                sortTable(currentSort.key);
+                renderColumnMenu();
+            }});
+
+            btnContainer.appendChild(selectAllBtn);
+            btnContainer.appendChild(deselectAllBtn);
+            menu.appendChild(btnContainer);
+
+            // 列复选框
             columns.forEach(col => {{
                 const label = document.createElement('label');
                 const checkbox = document.createElement('input');
@@ -869,6 +964,7 @@ def generate_html_report_from_batch_results(
                 metrics.long_positions = pos_data.get('long_positions', 0)
                 metrics.short_positions = pos_data.get('short_positions', 0)
                 metrics.position_bias = pos_data.get('position_bias', '中性')
+                metrics.total_position_value = pos_data.get('total_position_value', 0)
 
                 metrics.hold_time_today = hold_data.get('todayCount', 0)
                 metrics.hold_time_7d = hold_data.get('last7DaysAverage', 0)
