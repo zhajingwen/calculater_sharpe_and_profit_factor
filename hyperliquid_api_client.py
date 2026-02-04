@@ -10,85 +10,17 @@ from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 import time
 import threading
+from retry import retry
 
 
-class RateLimiter:
-    """
-    全局请求速率限制器（线程安全）
-
-    用于控制 API 请求频率，避免触发 429 限流
-    """
-
-    def __init__(self, requests_per_second: float = 2.0, burst_limit: int = 5):
-        """
-        初始化速率限制器
-
-        Args:
-            requests_per_second: 每秒允许的请求数（默认 2.0）
-            burst_limit: 突发请求上限（默认 5）
-        """
-        self.min_interval = 1.0 / requests_per_second  # 最小请求间隔
-        self.burst_limit = burst_limit
-        self.tokens = burst_limit  # 令牌桶当前令牌数
-        self.last_update = time.time()
-        self.lock = threading.Lock()
-        self.backoff_until = 0  # 退避截止时间
-
-    def acquire(self, timeout: float = 30.0) -> bool:
-        """
-        获取请求许可（阻塞直到获得许可或超时）
-
-        Args:
-            timeout: 等待超时时间（秒）
-
-        Returns:
-            是否成功获取许可
-        """
-        start_time = time.time()
-
-        while True:
-            with self.lock:
-                now = time.time()
-
-                # 检查是否在退避期
-                if now < self.backoff_until:
-                    wait_time = self.backoff_until - now
-                    if wait_time > timeout - (now - start_time):
-                        return False  # 超时
-                else:
-                    # 补充令牌
-                    elapsed = now - self.last_update
-                    self.tokens = min(self.burst_limit, self.tokens + elapsed / self.min_interval)
-                    self.last_update = now
-
-                    # 尝试获取令牌
-                    if self.tokens >= 1:
-                        self.tokens -= 1
-                        return True
-
-                    wait_time = (1 - self.tokens) * self.min_interval
-
-            # 检查超时
-            if time.time() - start_time > timeout:
-                return False
-
-            # 等待一小段时间后重试
-            time.sleep(min(wait_time, 0.1))
-
-    def set_backoff(self, seconds: float):
-        """
-        设置全局退避时间（当收到 429 时调用）
-
-        Args:
-            seconds: 退避秒数
-        """
-        with self.lock:
-            self.backoff_until = max(self.backoff_until, time.time() + seconds)
-            self.tokens = 0  # 清空令牌
+class RateLimitError(Exception):
+    """API 限流错误（429）"""
+    pass
 
 
-# 全局速率限制器实例
-_global_rate_limiter = RateLimiter(requests_per_second=1.5, burst_limit=3)
+class APIRequestError(Exception):
+    """API 请求错误"""
+    pass
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
@@ -143,71 +75,66 @@ class HyperliquidAPIClient:
             'User-Agent': 'HyperliquidAnalyzer/1.0'
         })
     
-    def _make_request(self, endpoint: str, payload: Dict[str, Any],
-                      max_retries: int = 5) -> Dict[str, Any]:
+    @retry(
+        exceptions=(RateLimitError, requests.exceptions.Timeout, requests.exceptions.ConnectionError),
+        tries=5,
+        delay=2,
+        backoff=2,
+        max_delay=60,
+        logger=None  # 禁用默认日志，使用自定义输出
+    )
+    def _make_request(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        发送POST请求到Hyperliquid API（带速率限制和重试机制）
+        发送POST请求到Hyperliquid API（带自动重试）
+
+        使用 @retry 装饰器实现：
+        - 最多重试 5 次
+        - 指数退避: 2s → 4s → 8s → 16s → 32s（最大 60s）
+        - 自动处理 429 限流、超时、连接错误
 
         Args:
             endpoint: API端点
             payload: 请求载荷
-            max_retries: 最大重试次数
 
         Returns:
             API响应数据
         """
         url = f"{self.base_url}{endpoint}"
 
-        for attempt in range(max_retries):
-            # 等待速率限制器许可
-            if not _global_rate_limiter.acquire(timeout=60):
-                raise Exception("获取请求许可超时，可能处于全局退避状态")
+        # 请求前延迟，避免过快触发限流
+        time.sleep(0.5)
 
-            try:
-                response = self.session.post(url, json=payload, timeout=30)
+        try:
+            response = self.session.post(url, json=payload, timeout=30)
 
-                # 处理429限流错误
-                if response.status_code == 429:
-                    # 使用指数退避: 3, 6, 12, 24, 48 秒
-                    base_wait = int(response.headers.get('Retry-After', 3))
-                    wait_time = base_wait * (2 ** attempt)
-                    wait_time = min(wait_time, 60)  # 最多等待 60 秒
+            # 429 限流 - 抛出 RateLimitError 触发重试
+            if response.status_code == 429:
+                retry_after = int(response.headers.get('Retry-After', 3))
+                print(f"⚠️  API限流(429)，{retry_after}秒后重试...")
+                time.sleep(retry_after)  # 先等待 Retry-After 指定的时间
+                raise RateLimitError(f"429 Too Many Requests")
 
-                    # 设置全局退避
-                    _global_rate_limiter.set_backoff(wait_time)
+            # 5xx 服务器错误 - 也触发重试
+            if response.status_code >= 500:
+                print(f"⚠️  服务器错误({response.status_code})，重试中...")
+                raise requests.exceptions.ConnectionError(f"Server error: {response.status_code}")
 
-                    if attempt < max_retries - 1:
-                        print(f"⚠️  API限流(429)，全局退避 {wait_time} 秒...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        raise Exception(f"API请求失败: 429 Too Many Requests (已重试{max_retries}次)")
+            response.raise_for_status()
+            return response.json()
 
-                response.raise_for_status()
-                return response.json()
+        except requests.exceptions.Timeout:
+            print(f"⚠️  请求超时，重试中...")
+            raise
 
-            except requests.exceptions.Timeout:
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** (attempt + 1)  # 指数退避: 2s, 4s, 8s, 16s
-                    print(f"⚠️  请求超时，{wait_time}秒后重试 ({attempt + 1}/{max_retries})")
-                    time.sleep(wait_time)
-                    continue
-                raise Exception(f"API请求超时")
+        except requests.exceptions.ConnectionError:
+            print(f"⚠️  连接错误，重试中...")
+            raise
 
-            except requests.exceptions.RequestException as e:
-                # 5xx服务器错误才重试
-                if attempt < max_retries - 1 and hasattr(e, 'response') and e.response and e.response.status_code >= 500:
-                    wait_time = 2 ** (attempt + 1)
-                    print(f"⚠️  服务器错误，{wait_time}秒后重试 ({attempt + 1}/{max_retries})")
-                    time.sleep(wait_time)
-                    continue
-                raise Exception(f"API请求失败: {e}")
+        except requests.exceptions.RequestException as e:
+            raise APIRequestError(f"API请求失败: {e}")
 
-            except json.JSONDecodeError as e:
-                raise Exception(f"JSON解析失败: {e}")
-
-        # 如果所有重试都失败
-        raise Exception(f"API请求失败: 超过最大重试次数")
+        except json.JSONDecodeError as e:
+            raise APIRequestError(f"JSON解析失败: {e}")
     
     def get_user_fills(self, user_address: str, max_fills: Optional[int] = None) -> List[Dict[str, Any]]:
         """
