@@ -3,7 +3,7 @@ Hyperliquid投资组合分析器
 提供详细的数据解析、统计计算和格式化输出功能
 """
 
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any
 from datetime import datetime
 from collections import defaultdict
 
