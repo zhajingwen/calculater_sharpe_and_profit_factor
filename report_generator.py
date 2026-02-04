@@ -6,6 +6,21 @@
 from typing import Dict
 from datetime import datetime
 
+# ========== 颜色支持 ==========
+try:
+    from colorama import Fore, Back, Style, init
+    init(autoreset=True)
+    COLORS_ENABLED = True
+except ImportError:
+    # 如果没有 colorama，使用空字符串
+    class Fore:
+        GREEN = YELLOW = RED = CYAN = MAGENTA = BLUE = WHITE = LIGHTBLACK_EX = LIGHTGREEN_EX = LIGHTRED_EX = ""
+    class Back:
+        BLACK = ""
+    class Style:
+        BRIGHT = RESET_ALL = DIM = ""
+    COLORS_ENABLED = False
+
 
 def format_profit_factor(pf: float) -> str:
     """格式化 Profit Factor 显示
@@ -19,6 +34,27 @@ def format_profit_factor(pf: float) -> str:
     if pf >= 1000:
         return "1000+"
     return f"{pf:.4f}"
+
+
+def print_report_progress(step: str, message: str, status: str = "info") -> None:
+    """打印报告生成进度（带颜色）
+
+    Args:
+        step: 步骤名称
+        message: 消息内容
+        status: 状态类型 ('info', 'success', 'warning', 'error')
+    """
+    status_icons = {
+        'info': f'{Fore.CYAN}ℹ️ {Style.RESET_ALL}',
+        'success': f'{Fore.GREEN}✅{Style.RESET_ALL}',
+        'warning': f'{Fore.YELLOW}⚠️ {Style.RESET_ALL}',
+        'error': f'{Fore.RED}❌{Style.RESET_ALL}'
+    }
+
+    icon = status_icons.get(status, status_icons['info'])
+    step_colored = f'{Fore.CYAN}{Style.BRIGHT}[{step}]{Style.RESET_ALL}'
+
+    print(f'{icon} {step_colored} {message}')
 
 
 def format_hold_time(days: float) -> str:
@@ -391,14 +427,14 @@ Sharpe Ratio = (平均收益率 - 无风险利率) / 收益率标准差
     try:
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(md_content)
-        return f"✅ Markdown 报告已保存至: {filename}"
+        return f"{Fore.GREEN}{Style.BRIGHT}✅ Markdown 报告已保存至: {Fore.CYAN}{filename}{Style.RESET_ALL}"
     except Exception as e:
-        return f"❌ 保存报告失败: {str(e)}"
+        return f"{Fore.RED}{Style.BRIGHT}❌ 保存报告失败: {str(e)}{Style.RESET_ALL}"
 
 
 def generate_summary_text(results: Dict) -> str:
     """
-    生成简洁的文本摘要
+    生成简洁的文本摘要（带颜色）
 
     Args:
         results: 分析结果字典
@@ -407,11 +443,11 @@ def generate_summary_text(results: Dict) -> str:
         str: 摘要文本
     """
     if "error" in results:
-        return f"分析失败: {results['error']}"
+        return f"{Fore.RED}{Style.BRIGHT}分析失败: {results['error']}{Style.RESET_ALL}"
 
     fills = results.get('_raw_fills', [])
     if not fills:
-        return "无法获取交易数据"
+        return f"{Fore.RED}无法获取交易数据{Style.RESET_ALL}"
 
     # 使用基于交易收益率的指标
     sharpe_on_trades = results.get('sharpe_on_trades', {})
@@ -420,26 +456,50 @@ def generate_summary_text(results: Dict) -> str:
     profit_factor = results.get('profit_factor', 0.0)
     pf_display = format_profit_factor(profit_factor)
 
-    # 判断盈利能力
-    if profit_factor >= 1000:
-        profit_status = '✅ 极优秀（无亏损）'
-    elif profit_factor > 1:
-        profit_status = '✅ 盈利'
+    # Sharpe Ratio 颜色
+    sharpe_val = sharpe_on_trades.get('annualized_sharpe', 0)
+    if sharpe_val > 1:
+        sharpe_color = Fore.GREEN + Style.BRIGHT
+        sharpe_rating = f'{Fore.GREEN}✅ 优秀{Style.RESET_ALL}'
+    elif sharpe_val > 0:
+        sharpe_color = Fore.YELLOW
+        sharpe_rating = f'{Fore.YELLOW}⚠️ 偏低{Style.RESET_ALL}'
     else:
-        profit_status = '❌ 亏损'
+        sharpe_color = Fore.RED
+        sharpe_rating = f'{Fore.RED}❌ 负收益{Style.RESET_ALL}'
+
+    # Profit Factor 颜色和状态
+    if profit_factor >= 1000:
+        pf_color = Fore.GREEN + Style.BRIGHT
+        profit_status = f'{Fore.GREEN}{Style.BRIGHT}✅ 极优秀（无亏损）{Style.RESET_ALL}'
+    elif profit_factor > 1:
+        pf_color = Fore.GREEN + Style.BRIGHT
+        profit_status = f'{Fore.GREEN}✅ 盈利{Style.RESET_ALL}'
+    else:
+        pf_color = Fore.RED
+        profit_status = f'{Fore.RED}❌ 亏损{Style.RESET_ALL}'
+
+    # Win Rate 颜色
+    win_rate = results.get('win_rate', {}).get('winRate', 0)
+    if win_rate >= 60:
+        wr_color = Fore.GREEN + Style.BRIGHT
+    elif win_rate >= 45:
+        wr_color = Fore.YELLOW + Style.BRIGHT
+    else:
+        wr_color = Fore.RED + Style.BRIGHT
 
     summary = f"""
-📊 交易分析摘要
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{Fore.CYAN}{Style.BRIGHT}📊 交易分析摘要{Style.RESET_ALL}
+{Fore.CYAN}{'━' * 40}{Style.RESET_ALL}
 
-✅ 核心指标
-  • Sharpe Ratio: {sharpe_on_trades.get('annualized_sharpe', 0):.2f}
-  • Profit Factor: {pf_display}
-  • Win Rate: {results.get('win_rate', {}).get('winRate', 0):.2f}%
+{Fore.GREEN}{Style.BRIGHT}✅ 核心指标{Style.RESET_ALL}
+  {Fore.CYAN}•{Style.RESET_ALL} Sharpe Ratio: {sharpe_color}{sharpe_val:.2f}{Style.RESET_ALL}
+  {Fore.CYAN}•{Style.RESET_ALL} Profit Factor: {pf_color}{pf_display}{Style.RESET_ALL}
+  {Fore.CYAN}•{Style.RESET_ALL} Win Rate: {wr_color}{win_rate:.2f}%{Style.RESET_ALL}
 
-🎯 评级
-  • 风险调整收益: {'✅ 优秀' if sharpe_on_trades.get('annualized_sharpe', 0) > 1 else '⚠️ 偏低'}
-  • 盈利能力: {profit_status}
+{Fore.YELLOW}{Style.BRIGHT}🎯 评级{Style.RESET_ALL}
+  {Fore.CYAN}•{Style.RESET_ALL} 风险调整收益: {sharpe_rating}
+  {Fore.CYAN}•{Style.RESET_ALL} 盈利能力: {profit_status}
 """
 
     return summary
