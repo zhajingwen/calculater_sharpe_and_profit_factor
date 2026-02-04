@@ -565,6 +565,141 @@ def generate_html_report(
             border-color: var(--accent-cyan);
         }}
 
+        /* 筛选器样式 */
+        .filter-container {{
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }}
+
+        .filter-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }}
+
+        .filter-header h3 {{
+            font-size: 1rem;
+            color: var(--text-primary);
+            margin: 0;
+        }}
+
+        .filter-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }}
+
+        .filter-row {{
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }}
+
+        .filter-select, .filter-input {{
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+        }}
+
+        .filter-select {{
+            min-width: 140px;
+        }}
+
+        .filter-input {{
+            width: 100px;
+        }}
+
+        .filter-select:focus, .filter-input:focus {{
+            outline: none;
+            border-color: var(--accent-cyan);
+        }}
+
+        .filter-btn {{
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+
+        .filter-btn-add {{
+            background: var(--accent-cyan);
+            color: var(--bg-primary);
+            border-color: var(--accent-cyan);
+        }}
+
+        .filter-btn-add:hover {{
+            background: #4090e0;
+        }}
+
+        .filter-btn-remove {{
+            background: var(--bg-tertiary);
+            color: var(--accent-red);
+            border-color: var(--accent-red);
+            padding: 8px 12px;
+        }}
+
+        .filter-btn-remove:hover {{
+            background: var(--accent-red);
+            color: white;
+        }}
+
+        .filter-btn-clear {{
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }}
+
+        .filter-btn-clear:hover {{
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }}
+
+        .filter-actions {{
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }}
+
+        .filter-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--accent-cyan);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 0.8rem;
+            color: var(--accent-cyan);
+        }}
+
+        .filter-badge-remove {{
+            cursor: pointer;
+            color: var(--accent-red);
+            font-weight: bold;
+        }}
+
+        .active-filters {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }}
+
+        .filter-result-count {{
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-left: auto;
+        }}
+
         @media (max-width: 768px) {{
             .stats-grid {{
                 grid-template-columns: repeat(2, 1fr);
@@ -608,6 +743,23 @@ def generate_html_report(
             <div class="stat-card">
                 <div class="label">盈利地址数</div>
                 <div class="value positive">{profitable_count} / {success_count}</div>
+            </div>
+        </div>
+
+        <div class="filter-container">
+            <div class="filter-header">
+                <h3>🔧 指标筛选</h3>
+                <span class="filter-result-count" id="filterResultCount"></span>
+            </div>
+            <div class="filter-list" id="filterList">
+                <!-- 筛选条件将由 JS 生成 -->
+            </div>
+            <div class="filter-actions">
+                <button class="filter-btn filter-btn-add" id="addFilterBtn">+ 添加筛选条件</button>
+                <button class="filter-btn filter-btn-clear" id="clearFiltersBtn">清除全部</button>
+            </div>
+            <div class="active-filters" id="activeFilters">
+                <!-- 活动筛选标签将由 JS 生成 -->
             </div>
         </div>
 
@@ -680,10 +832,10 @@ def generate_html_report(
             {{ key: 'total_positions', label: '当前持仓数', format: v => v, defaultVisible: false }},
             {{ key: 'total_position_value', label: '持仓总价值', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true }},
             // 持仓时间
-            {{ key: 'avg_hold_time', label: '平均持仓时间', format: v => formatHoldTime(v), defaultVisible: true }},
-            {{ key: 'hold_time_today', label: '今日持仓时间', format: v => formatHoldTime(v), defaultVisible: false }},
-            {{ key: 'hold_time_7d', label: '7天持仓时间', format: v => formatHoldTime(v), defaultVisible: false }},
-            {{ key: 'hold_time_30d', label: '30天持仓时间', format: v => formatHoldTime(v), defaultVisible: false }},
+            {{ key: 'avg_hold_time', label: '历史平均持仓', format: v => formatHoldTime(v), defaultVisible: true }},
+            {{ key: 'hold_time_today', label: '今日平均持仓', format: v => formatHoldTime(v), defaultVisible: false }},
+            {{ key: 'hold_time_7d', label: '7天平均持仓', format: v => formatHoldTime(v), defaultVisible: false }},
+            {{ key: 'hold_time_30d', label: '30天平均持仓', format: v => formatHoldTime(v), defaultVisible: false }},
             // ROE 指标
             {{ key: 'roe_24h', label: 'ROE(24h)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: true, colorByValue: true }},
             {{ key: 'roe_7d', label: 'ROE(7d)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: false, colorByValue: true }},
@@ -696,6 +848,14 @@ def generate_html_report(
 
         // 当前排序
         let currentSort = {{ key: 'rank', dir: 'asc' }};
+
+        // 筛选条件
+        let filters = [];
+
+        // 获取可筛选的数值列（排除地址和文本列）
+        const filterableColumns = columns.filter(c =>
+            c.key !== 'address' && c.key !== 'position_bias' && c.key !== 'rank'
+        );
 
         // 格式化函数
         function formatCurrency(value) {{
@@ -788,31 +948,225 @@ def generate_html_report(
                 currentSort.dir = 'desc';
             }}
 
-            const sortedData = [...tableData].sort((a, b) => {{
-                let aVal = a[key];
-                let bVal = b[key];
+            renderHeader();
+            applyFiltersAndRender();
+        }}
 
-                // 字符串比较
+        // 搜索词
+        let searchTerm = '';
+
+        // 应用所有筛选条件并返回数据
+        function getFilteredData() {{
+            let data = [...tableData];
+
+            // 应用地址搜索
+            if (searchTerm) {{
+                data = data.filter(row =>
+                    row.address.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+            }}
+
+            // 应用数值筛选
+            filters.forEach(filter => {{
+                data = data.filter(row => {{
+                    const value = row[filter.column];
+                    switch (filter.operator) {{
+                        case 'gt': return value > filter.value1;
+                        case 'gte': return value >= filter.value1;
+                        case 'lt': return value < filter.value1;
+                        case 'lte': return value <= filter.value1;
+                        case 'eq': return value === filter.value1;
+                        case 'between': return value >= filter.value1 && value <= filter.value2;
+                        default: return true;
+                    }}
+                }});
+            }});
+
+            return data;
+        }}
+
+        // 应用排序并渲染
+        function applyFiltersAndRender() {{
+            let data = getFilteredData();
+
+            // 应用排序
+            data.sort((a, b) => {{
+                let aVal = a[currentSort.key];
+                let bVal = b[currentSort.key];
+
                 if (typeof aVal === 'string') {{
                     return currentSort.dir === 'asc'
                         ? aVal.localeCompare(bVal)
                         : bVal.localeCompare(aVal);
                 }}
 
-                // 数字比较
                 return currentSort.dir === 'asc' ? aVal - bVal : bVal - aVal;
             }});
 
-            renderHeader();
-            renderTable(sortedData);
+            renderTable(data);
+            updateFilterResultCount(data.length);
+            renderActiveFilters();
         }}
 
-        // 搜索功能
-        function filterTable(searchTerm) {{
-            const filtered = tableData.filter(row =>
-                row.address.toLowerCase().includes(searchTerm.toLowerCase())
-            );
-            renderTable(filtered);
+        // 更新筛选结果计数
+        function updateFilterResultCount(count) {{
+            const el = document.getElementById('filterResultCount');
+            if (filters.length > 0 || searchTerm) {{
+                el.textContent = `显示 ${{count}} / ${{tableData.length}} 条记录`;
+            }} else {{
+                el.textContent = '';
+            }}
+        }}
+
+        // 渲染活动筛选标签
+        function renderActiveFilters() {{
+            const container = document.getElementById('activeFilters');
+            container.innerHTML = '';
+
+            filters.forEach((filter, index) => {{
+                const col = columns.find(c => c.key === filter.column);
+                const badge = document.createElement('span');
+                badge.className = 'filter-badge';
+
+                let text = col.label + ' ';
+                switch (filter.operator) {{
+                    case 'gt': text += '> ' + filter.value1; break;
+                    case 'gte': text += '≥ ' + filter.value1; break;
+                    case 'lt': text += '< ' + filter.value1; break;
+                    case 'lte': text += '≤ ' + filter.value1; break;
+                    case 'eq': text += '= ' + filter.value1; break;
+                    case 'between': text += filter.value1 + ' ~ ' + filter.value2; break;
+                }}
+
+                badge.innerHTML = text + ' <span class="filter-badge-remove" data-index="' + index + '">×</span>';
+                container.appendChild(badge);
+            }});
+
+            // 绑定删除事件
+            container.querySelectorAll('.filter-badge-remove').forEach(btn => {{
+                btn.addEventListener('click', (e) => {{
+                    const idx = parseInt(e.target.dataset.index);
+                    filters.splice(idx, 1);
+                    renderFilterList();
+                    applyFiltersAndRender();
+                }});
+            }});
+        }}
+
+        // 渲染筛选条件列表
+        function renderFilterList() {{
+            const list = document.getElementById('filterList');
+            list.innerHTML = '';
+
+            filters.forEach((filter, index) => {{
+                const row = document.createElement('div');
+                row.className = 'filter-row';
+
+                // 列选择
+                const colSelect = document.createElement('select');
+                colSelect.className = 'filter-select';
+                filterableColumns.forEach(col => {{
+                    const opt = document.createElement('option');
+                    opt.value = col.key;
+                    opt.textContent = col.label;
+                    opt.selected = col.key === filter.column;
+                    colSelect.appendChild(opt);
+                }});
+
+                // 操作符选择
+                const opSelect = document.createElement('select');
+                opSelect.className = 'filter-select';
+                const operators = [
+                    {{ value: 'gt', label: '大于 (>)' }},
+                    {{ value: 'gte', label: '大于等于 (≥)' }},
+                    {{ value: 'lt', label: '小于 (<)' }},
+                    {{ value: 'lte', label: '小于等于 (≤)' }},
+                    {{ value: 'eq', label: '等于 (=)' }},
+                    {{ value: 'between', label: '区间' }}
+                ];
+                operators.forEach(op => {{
+                    const opt = document.createElement('option');
+                    opt.value = op.value;
+                    opt.textContent = op.label;
+                    opt.selected = op.value === filter.operator;
+                    opSelect.appendChild(opt);
+                }});
+
+                // 数值输入1
+                const input1 = document.createElement('input');
+                input1.type = 'number';
+                input1.step = 'any';
+                input1.className = 'filter-input';
+                input1.placeholder = '数值';
+                input1.value = filter.value1 || '';
+
+                // 数值输入2（区间用）
+                const input2 = document.createElement('input');
+                input2.type = 'number';
+                input2.step = 'any';
+                input2.className = 'filter-input';
+                input2.placeholder = '最大值';
+                input2.value = filter.value2 || '';
+                input2.style.display = filter.operator === 'between' ? 'block' : 'none';
+
+                // 删除按钮
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'filter-btn filter-btn-remove';
+                removeBtn.textContent = '×';
+
+                // 事件绑定
+                colSelect.addEventListener('change', () => {{
+                    filters[index].column = colSelect.value;
+                    applyFiltersAndRender();
+                }});
+
+                opSelect.addEventListener('change', () => {{
+                    filters[index].operator = opSelect.value;
+                    input2.style.display = opSelect.value === 'between' ? 'block' : 'none';
+                    applyFiltersAndRender();
+                }});
+
+                input1.addEventListener('input', () => {{
+                    filters[index].value1 = parseFloat(input1.value) || 0;
+                    applyFiltersAndRender();
+                }});
+
+                input2.addEventListener('input', () => {{
+                    filters[index].value2 = parseFloat(input2.value) || 0;
+                    applyFiltersAndRender();
+                }});
+
+                removeBtn.addEventListener('click', () => {{
+                    filters.splice(index, 1);
+                    renderFilterList();
+                    applyFiltersAndRender();
+                }});
+
+                row.appendChild(colSelect);
+                row.appendChild(opSelect);
+                row.appendChild(input1);
+                row.appendChild(input2);
+                row.appendChild(removeBtn);
+                list.appendChild(row);
+            }});
+        }}
+
+        // 添加筛选条件
+        function addFilter() {{
+            filters.push({{
+                column: filterableColumns[0].key,
+                operator: 'gt',
+                value1: 0,
+                value2: 0
+            }});
+            renderFilterList();
+        }}
+
+        // 清除所有筛选
+        function clearFilters() {{
+            filters = [];
+            renderFilterList();
+            applyFiltersAndRender();
         }}
 
         // 列选择器
@@ -878,11 +1232,17 @@ def generate_html_report(
             renderHeader();
             renderTable(tableData);
             renderColumnMenu();
+            renderFilterList();
 
             // 搜索事件
             document.getElementById('searchInput').addEventListener('input', e => {{
-                filterTable(e.target.value);
+                searchTerm = e.target.value;
+                applyFiltersAndRender();
             }});
+
+            // 筛选器按钮事件
+            document.getElementById('addFilterBtn').addEventListener('click', addFilter);
+            document.getElementById('clearFiltersBtn').addEventListener('click', clearFilters);
 
             // 列选择器切换
             const toggle = document.getElementById('columnToggle');
