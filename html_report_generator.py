@@ -832,10 +832,10 @@ def generate_html_report(
             {{ key: 'total_positions', label: '当前持仓数', format: v => v, defaultVisible: false }},
             {{ key: 'total_position_value', label: '持仓总价值', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true }},
             // 持仓时间
-            {{ key: 'avg_hold_time', label: '历史平均持仓', format: v => formatHoldTime(v), defaultVisible: true }},
-            {{ key: 'hold_time_today', label: '今日平均持仓', format: v => formatHoldTime(v), defaultVisible: false }},
-            {{ key: 'hold_time_7d', label: '7天平均持仓', format: v => formatHoldTime(v), defaultVisible: false }},
-            {{ key: 'hold_time_30d', label: '30天平均持仓', format: v => formatHoldTime(v), defaultVisible: false }},
+            {{ key: 'avg_hold_time', label: '历史平均持仓时间', format: v => formatHoldTime(v), defaultVisible: true }},
+            {{ key: 'hold_time_today', label: '今日平均持仓时间', format: v => formatHoldTime(v), defaultVisible: false }},
+            {{ key: 'hold_time_7d', label: '7天平均持仓时间', format: v => formatHoldTime(v), defaultVisible: false }},
+            {{ key: 'hold_time_30d', label: '30天平均持仓时间', format: v => formatHoldTime(v), defaultVisible: false }},
             // ROE 指标
             {{ key: 'roe_24h', label: 'ROE(24h)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: true, colorByValue: true }},
             {{ key: 'roe_7d', label: 'ROE(7d)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: false, colorByValue: true }},
