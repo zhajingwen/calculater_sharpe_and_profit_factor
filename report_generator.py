@@ -118,23 +118,19 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
     if has_valid_roe:
         md_content += """## 📊 多周期ROE指标
 
-| 时间周期 | ROE | 起始权益 | 当前权益 | PNL | 评级 |
-|---------|-----|----------|----------|-----|------|
+| 时间周期 | ROE |
+|---------|-----|
 """
 
         # 添加各个周期的数据
         for roe_data, label in [(roe_24h, '24小时'), (roe_7d, '7天'), (roe_30d, '30天'), (roe_all, '历史总计')]:
             if roe_data.get('is_valid', False):
                 roe_percent = roe_data.get('roe_percent', 0)
-                start_equity = roe_data.get('start_equity', 0)
-                current_equity = roe_data.get('current_equity', 0)
-                pnl = roe_data.get('pnl', 0)
-                rating = get_roe_rating(roe_percent)
 
-                md_content += f"| **{label}** | **{roe_percent:+.2f}%** | ${start_equity:,.2f} | ${current_equity:,.2f} | {'+' if pnl >= 0 else ''}${pnl:,.2f} | {rating} |\n"
+                md_content += f"| **{label}** | **{roe_percent:+.2f}%** |\n"
             else:
                 error_msg = roe_data.get('error_message', '计算失败')
-                md_content += f"| **{label}** | ❌ | - | - | - | {error_msg[:20]} |\n"
+                md_content += f"| **{label}** | ❌ {error_msg[:30]} |\n"
 
         md_content += "\n"
 

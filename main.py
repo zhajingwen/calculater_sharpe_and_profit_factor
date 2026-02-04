@@ -303,9 +303,9 @@ def display_account_info(analysis: AnalysisResults) -> None:
         print(f"\n  ┌─ 多周期ROE {roe_icon}")
         print("  │")
 
-        widths = [20, 14, 14, 18, 18]
+        widths = [20, 14]
         print_table_separator(widths, 'top')
-        print_table_row(['时间周期', 'ROE', '起始权益', '当前权益', '评级'], widths)
+        print_table_row(['时间周期', 'ROE'], widths)
         print_table_separator(widths, 'mid')
 
         # 显示各个周期的ROE
@@ -317,20 +317,17 @@ def display_account_info(analysis: AnalysisResults) -> None:
         ]:
             if roe_data.get('is_valid', False):
                 roe_percent = roe_data.get('roe_percent', 0)
-                start_equity = roe_data.get('start_equity', 0)
-                current_equity = roe_data.get('current_equity', 0)
-                rating = get_roe_rating(roe_percent)
 
                 roe_sign = '+' if roe_percent >= 0 else ''
                 print_table_row(
-                    [label, f'{roe_sign}{roe_percent:.2f}%', f'${start_equity:,.0f}', f'${current_equity:,.0f}', rating],
-                    widths, ['left', 'right', 'right', 'right', 'left']
+                    [label, f'{roe_sign}{roe_percent:.2f}%'],
+                    widths, ['left', 'right']
                 )
             else:
                 error_msg = roe_data.get('error_message', '计算失败')
                 print_table_row(
-                    [label, '❌', '-', '-', error_msg[:12]],
-                    widths, ['left', 'center', 'center', 'center', 'left']
+                    [label, f'❌ {error_msg[:20]}'],
+                    widths, ['left', 'left']
                 )
 
         print_table_separator(widths, 'bottom')
