@@ -231,7 +231,7 @@ class ApexCalculator:
             print(f"✗ 获取保证金摘要失败: {e}")
             return {}
     
-    def calculate_profit_factor(self, fills: List[Dict], asset_positions: Optional[List[Dict]] = None) -> Union[float, str]:
+    def calculate_profit_factor(self, fills: List[Dict], asset_positions: Optional[List[Dict]] = None) -> float:
         """
         计算盈亏因子（基于Apex Liquid Bot算法）
 
@@ -244,16 +244,17 @@ class ApexCalculator:
 
         返回：
             - float: 盈亏因子数值
-            - "1000+": 只有盈利没有亏损时
-            - 0: 无交易记录时
+            - 1000.0: 只有盈利没有亏损时（表示无穷大）
+            - 0.0: 无交易记录时
 
         算法说明：
             1. 累计所有已实现盈亏（来自fills）
             2. 累计所有未实现盈亏（来自当前持仓）
             3. 计算总盈利和总亏损的比值
+            4. 当无亏损时返回 1000.0（代表无穷大）
         """
         if not fills and not asset_positions:
-            return 0
+            return 0.0
 
         total_gains = Decimal('0')
         total_losses = Decimal('0')
@@ -277,7 +278,8 @@ class ApexCalculator:
 
         # 计算盈亏因子
         if total_losses == 0:
-            return "1000+" if total_gains > 0 else 0
+            # 无亏损时返回 1000.0 表示无穷大（而非字符串）
+            return 1000.0 if total_gains > 0 else 0.0
 
         profit_factor = total_gains / total_losses
         return float(profit_factor)
@@ -354,79 +356,7 @@ class ApexCalculator:
             "bias": bias,
             "totalTrades": total_trades
         }
-    
-    def calculate_roe(self, portfolio_data: List[Dict], period: str = "perpAllTime") -> float:
-        """
-        计算股本回报率ROE（基于Apex Liquid Bot算法）
 
-        ROE = (净收益 / 加权平均资本) × 100%
-        该指标衡量资金使用效率，考虑了出入金的影响
-
-        参数：
-            portfolio_data: 投资组合数据，包含accountValueHistory和pnlHistory
-            period: 时间周期过滤器（默认"perpAllTime"）
-
-        返回：
-            float: ROE百分比
-
-        算法说明：
-            1. 识别所有出入金流水
-            2. 计算净收益（排除出入金影响）
-            3. 计算加权平均资本
-            4. 应用ROE公式
-        """
-        # 根据时间周期过滤数据
-        filtered_data = [item for item in portfolio_data if item[0] == period]
-        if not filtered_data:
-            return 0.0
-
-        data = filtered_data[0][1]
-        account_history = data.get('accountValueHistory', [])
-        pnl_history = data.get('pnlHistory', [])
-
-        if not account_history or len(account_history) < 2:
-            return 0.0
-
-        # 获取初始和最终余额
-        initial_balance = Decimal(str(account_history[0][1]))
-        final_balance = Decimal(str(account_history[-1][1]))
-
-        # 计算现金流（出入金）
-        cash_flows = []
-        for i in range(1, len(account_history)):
-            current_balance = Decimal(str(account_history[i][1]))
-            previous_balance = Decimal(str(account_history[i-1][1]))
-            current_pnl = Decimal(str(pnl_history[i][1])) if i < len(pnl_history) else Decimal('0')
-            previous_pnl = Decimal(str(pnl_history[i-1][1])) if i-1 < len(pnl_history) else Decimal('0')
-
-            # 计算出入金流量
-            expected_balance = previous_balance + (current_pnl - previous_pnl)
-            cash_flow = current_balance - expected_balance
-
-            # 只记录显著的现金流（>1e-9）
-            if abs(cash_flow) > Decimal('1e-9'):
-                cash_flows.append({
-                    'amount': cash_flow,
-                    'date': account_history[i][0]
-                })
-
-        # 计算加权平均资本和ROI
-        total_cash_flows = sum(cf['amount'] for cf in cash_flows)
-        net_income = final_balance - initial_balance - total_cash_flows
-
-        # 计算加权平均资本（简化方法）
-        weighted_capital = initial_balance
-        for cf in cash_flows:
-            # 按周期内剩余时间加权
-            weighted_capital += cf['amount'] * Decimal('0.5')  # 简化权重
-
-        if weighted_capital == 0:
-            return 0.0
-
-        roi = (net_income / weighted_capital) * 100
-        return float(roi)
-    
-    
     def calculate_hold_time_stats(self, fills: List[Dict]) -> Dict[str, float]:
         """
         计算平均持仓时间统计（改进版：区分多空方向，支持部分平仓）
@@ -461,7 +391,6 @@ class ApexCalculator:
                 "allTimeAverage": 0
             }
 
-        from datetime import datetime, timedelta
         from collections import defaultdict
 
         now = datetime.now()
@@ -597,11 +526,12 @@ class ApexCalculator:
         返回：
             完整的分析结果字典，包含：
             - 盈亏因子 (Profit Factor)
-            - 夏普比率 (Sharpe Ratio)
             - 胜率统计 (Win Rate)
-            - 最大回撤 (Max Drawdown)
             - 持仓时间统计 (Hold Time Stats)
             - 当前持仓分析 (Position Analysis)
+            - 夏普比率 - 基于交易收益率 (Sharpe Ratio on Trades)
+            - 最大回撤 - 基于交易收益率 (Max Drawdown on Trades)
+            - 收益率指标 - 基于交易收益率 (Return Metrics on Trades)
             - 原始数据摘要 (Data Summary)
 
         异常：
@@ -672,59 +602,44 @@ class ApexCalculator:
             results["total_realized_pnl"] = total_realized_pnl
             results["total_cumulative_pnl"] = total_cumulative_pnl
 
-            # 指标8: 真实本金计算 (True Capital)
-            ledger_records = self.api_client.get_user_ledger(user_address, start_time=0)
-            capital_info = self.calculate_true_capital(user_address, ledger_records)
-            results["capital_info"] = capital_info
-
-            # 指标9: 累计收益率和年化收益率 (Return Metrics)
-            current_account_value = results["data_summary"].get("account_value", 0)
-
-            # 获取第一笔和最后一笔交易时间
-            if fills:
-                first_trade_time = min(fill.get('time', 0) for fill in fills if fill.get('time', 0) > 0)
-                last_trade_time = max(fill.get('time', 0) for fill in fills if fill.get('time', 0) > 0)
-            else:
-                first_trade_time = 0
-                last_trade_time = 0
-
-            return_metrics = self.calculate_return_metrics(
-                current_value=current_account_value,
-                true_capital=capital_info['true_capital'],
-                total_cumulative_pnl=total_cumulative_pnl,
-                first_trade_time=first_trade_time,
-                last_trade_time=last_trade_time
-            )
-            results["return_metrics"] = return_metrics
-            # 指标10: 基于真实本金的 Sharpe Ratio（推荐方法）
+            # 指标8: 基于单笔交易收益率的 Sharpe Ratio（不依赖本金）
             if fills and len(fills) > 1:
-                sharpe_on_capital = self.calculate_sharpe_ratio_on_capital(
-                    fills=fills,
-                    true_capital=capital_info['true_capital']
-                )
-                results["sharpe_on_capital"] = sharpe_on_capital
+                sharpe_on_trades = self.calculate_sharpe_ratio_on_trades(fills)
+                results["sharpe_on_trades"] = sharpe_on_trades
             else:
-                results["sharpe_on_capital"] = {
+                results["sharpe_on_trades"] = {
                     "sharpe_ratio": 0,
                     "annualized_sharpe": 0,
-                    "mean_return_per_trade": 0,
-                    "std_dev": 0,
-                    "total_trades": 0
+                    "mean_return": 0,
+                    "std_return": 0,
+                    "total_trades": 0,
+                    "trades_per_year": 0
                 }
 
-            # 指标11: 基于真实本金的 Max Drawdown（推荐方法）
+            # 指标9: 基于单笔交易收益率的 Max Drawdown（不依赖本金）
             if fills and len(fills) > 1:
-                max_dd_on_capital = self.calculate_max_drawdown_on_capital(
-                    fills=fills,
-                    true_capital=capital_info['true_capital']
-                )
-                results["max_drawdown_on_capital"] = max_dd_on_capital
+                max_dd_on_trades = self.calculate_max_drawdown_on_trades(fills)
+                results["max_drawdown_on_trades"] = max_dd_on_trades
             else:
-                results["max_drawdown_on_capital"] = {
+                results["max_drawdown_on_trades"] = {
                     "max_drawdown_pct": 0,
                     "peak_return": 0,
                     "trough_return": 0,
-                    "total_trades": 0
+                    "total_trades": 0,
+                    "cumulative_return": 0
+                }
+
+            # 指标10: 基于单笔交易收益率的收益率指标（不依赖本金）
+            if fills and len(fills) > 1:
+                return_metrics_on_trades = self.calculate_return_metrics_on_trades(fills)
+                results["return_metrics_on_trades"] = return_metrics_on_trades
+            else:
+                results["return_metrics_on_trades"] = {
+                    "cumulative_return": 0,
+                    "annualized_return": 0,
+                    "trading_days": 0,
+                    "annualized_return_valid": False,
+                    "annualized_return_warnings": ["NO_TRADES"]
                 }
 
             return results
@@ -736,159 +651,6 @@ class ApexCalculator:
             print(f"详细错误信息:\n{traceback.format_exc()}")
             return {"error": error_msg}
 
-    def calculate_true_capital(self, user_address: str, ledger_records: List[Dict]) -> Dict[str, float]:
-        """
-        计算真实本金（算法 2: 完整版本）
-
-        计算公式:
-        true_capital = deposits - withdrawals + external_to_spot - external_out
-
-        考虑因素:
-        1. ✅ 充值和提现（deposit/withdraw）
-        2. ✅ 外部转入到 Spot（别人通过 send 转给我的）
-        3. ✅ 外部转出（我通过 send 转给别人的）
-        4. ❌ 排除内部 Perp ↔ Spot 转账（不影响总资金）
-
-        参数：
-            user_address: 用户地址
-            ledger_records: 账本记录列表
-
-        返回：
-            字典，包含：
-            - total_deposits: 总充值
-            - total_withdrawals: 总提现
-            - external_to_spot: 外部转入 Spot
-            - external_out: 外部转出
-            - true_capital: 真实本金
-        """
-        total_deposits = 0.0
-        total_withdrawals = 0.0
-        external_to_spot = 0.0
-        external_out = 0.0
-
-        addr_lower = user_address.lower()
-
-        for record in ledger_records:
-            delta = record.get('delta', {})
-            delta_type = delta.get('type', '')
-
-            if delta_type == 'deposit':
-                # 充值
-                amount = safe_float(delta.get('usdc', 0))
-                total_deposits += amount
-
-            elif delta_type == 'withdraw':
-                # 提现
-                amount = safe_float(delta.get('usdc', 0))
-                total_withdrawals += abs(amount)  # 提现可能是负数
-
-            elif delta_type == 'send':
-                # 转账操作
-                amount = safe_float(delta.get('amount', 0))
-                user = delta.get('user', '').lower()
-                dest = delta.get('destination', '').lower()
-                source_dex = delta.get('sourceDex', '')
-                dest_dex = delta.get('destinationDex', '')
-
-                # 判断是否为内部转账（Perp ↔ Spot）
-                is_internal_transfer = (user == addr_lower and dest == addr_lower)
-
-                if is_internal_transfer:
-                    # 内部转账，不影响总资金，跳过
-                    continue
-
-                # 外部转入到 Spot
-                if user != addr_lower and dest == addr_lower and dest_dex == 'spot':
-                    external_to_spot += amount
-
-                # 外部转出
-                elif user == addr_lower and dest != addr_lower:
-                    external_out += amount
-
-        # 计算真实本金
-        true_capital = (
-            total_deposits - total_withdrawals +
-            external_to_spot - external_out
-        )
-
-        return {
-            "total_deposits": total_deposits,
-            "total_withdrawals": total_withdrawals,
-            "external_to_spot": external_to_spot,
-            "external_out": external_out,
-            "true_capital": true_capital
-        }
-
-    def calculate_return_metrics(self, current_value: float, true_capital: float,
-                                 total_cumulative_pnl: float,
-                                 first_trade_time: int, last_trade_time: int) -> Dict[str, float]:
-        """
-        计算累计收益率和年化收益率（统一使用累计总盈亏）
-
-        参数：
-            current_value: 当前总账户价值（用于参考）
-            true_capital: 真实本金（充值 - 提现）
-            total_cumulative_pnl: 累计总盈亏（已实现+未实现）
-            first_trade_time: 第一笔交易时间戳（毫秒）
-            last_trade_time: 最后一笔交易时间戳（毫秒）
-
-        返回：
-            字典，包含：
-            - cumulative_return: 累计收益率（百分比，基于交易盈亏）
-            - annualized_return: 年化收益率（百分比）
-            - net_profit_trading: 交易净盈利（美元，基于累计总盈亏）
-            - net_profit_account: 账户净增长（美元，基于账户价值）
-            - trading_days: 交易天数
-            - annualized_return_valid: 年化收益率是否可靠
-        """
-        # 使用累计总盈亏作为主要净盈利指标（统一口径）
-        net_profit_trading = total_cumulative_pnl
-
-        # 计算账户净增长（作为参考）
-        net_profit_account = current_value - true_capital
-
-        # 计算累计收益率（基于交易盈亏）
-        if true_capital > 0:
-            cumulative_return = (net_profit_trading / true_capital) * 100
-        else:
-            cumulative_return = 0.0
-
-        # 计算交易天数
-        if first_trade_time > 0 and last_trade_time > first_trade_time:
-            trading_days = (last_trade_time - first_trade_time) / 1000 / 86400
-        else:
-            trading_days = 0.0
-
-        # 计算年化收益率（始终计算，但标记可靠性）
-        annualized_return = 0.0
-        annualized_return_valid = True
-
-        if trading_days > 0 and true_capital > 0:
-            # 年化收益率 = ((1 + 累计收益率) ^ (365 / 交易天数) - 1) × 100%
-            annual_factor = 365.0 / trading_days
-
-            try:
-                annualized_return = (math.pow(1 + cumulative_return / 100, annual_factor) - 1) * 100
-
-                # 对于交易天数较短的情况，标记为不可靠但仍显示计算值
-                if trading_days < 30:
-                    annualized_return_valid = False
-
-                # 如果年化收益率过大（>10000%），标记为不可靠
-                if abs(annualized_return) > 10000:
-                    annualized_return_valid = False
-            except (OverflowError, ValueError):
-                annualized_return = 0.0
-                annualized_return_valid = False
-
-        return {
-            "cumulative_return": cumulative_return,
-            "annualized_return": annualized_return,
-            "annualized_return_valid": annualized_return_valid,
-            "net_profit_trading": net_profit_trading,  # 主要指标：基于交易盈亏
-            "net_profit_account": net_profit_account,  # 参考指标：账户净增长
-            "trading_days": trading_days
-        }
 
     def _analyze_current_positions(self, asset_positions: List[Dict]) -> Dict[str, Any]:
         """
@@ -949,190 +711,129 @@ class ApexCalculator:
             "position_bias": bias
         }
 
-    def calculate_sharpe_ratio_on_capital(self, fills: List[Dict], true_capital: float,
-                                          risk_free_rate: float = 0.03) -> Dict[str, float]:
-        """
-        计算基于真实本金的夏普比率（方案 1: 推荐方法）
 
-        该方法基于真实本金计算夏普比率,不受杠杆影响
+    def calculate_sharpe_ratio_on_trades(self, fills: List[Dict],
+                                         risk_free_rate: float = 0.03) -> Dict[str, float]:
+        """
+        基于单笔交易收益率计算 Sharpe Ratio（不依赖本金）
 
         参数：
             fills: 成交记录列表
-            true_capital: 真实本金（充值 - 提现 + 外部转入 - 外部转出）
             risk_free_rate: 无风险利率（年化，默认3%）
 
         返回：
-            字典，包含：
             - sharpe_ratio: 每笔交易的夏普比率
             - annualized_sharpe: 年化夏普比率
-            - mean_return_per_trade: 平均每笔收益率（相对本金）
-            - std_dev: 收益率标准差
-            - total_trades: 分析的交易数量
-
-        算法说明：
-            1. 对每笔有PnL的交易，计算收益率 = PnL / True_Capital
-            2. 基于收益率序列计算均值和标准差
-            3. Sharpe = (mean_return - rf) / std_dev
-            4. 年化Sharpe = 每笔交易Sharpe × sqrt(年交易次数)
-
-        优势：
-            - ✅ 不受杠杆影响，真实反映风险收益比
-            - ✅ 与累计收益率计算逻辑一致
-            - ✅ 不受出入金影响（使用校正后的本金）
-            - ✅ 反映真实的资金使用效率
+            - mean_return: 平均每笔收益率
+            - std_return: 收益率标准差
+            - total_trades: 交易数量
+            - trades_per_year: 年交易频率
         """
-        if true_capital <= 0:
-            return {
-                "sharpe_ratio": 0,
-                "annualized_sharpe": 0,
-                "mean_return_per_trade": 0,
-                "std_dev": 0,
-                "total_trades": 0
-            }
-
         trade_returns = []
+        trade_times = []
 
-        # 遍历所有成交记录，提取平仓交易的收益率
         for fill in fills:
             closed_pnl = float(fill.get('closedPnl', 0))
-
-            # 只分析平仓交易（有PnL的交易）
             if closed_pnl == 0:
                 continue
 
-            # 计算交易收益率 = PnL / 真实本金
-            trade_return = closed_pnl / true_capital
-            trade_returns.append(trade_return)
+            sz = float(fill.get('sz', 0))
+            px = float(fill.get('px', 0))
+            notional_value = abs(sz) * px
 
-        # 数据不足时返回零值
+            if notional_value > 0:
+                trade_return = closed_pnl / notional_value
+                trade_returns.append(trade_return)
+                trade_times.append(fill.get('time', 0))
+
         if len(trade_returns) < 2:
             return {
                 "sharpe_ratio": 0,
                 "annualized_sharpe": 0,
-                "mean_return_per_trade": 0,
-                "std_dev": 0,
-                "total_trades": 0
+                "mean_return": 0,
+                "std_return": 0,
+                "total_trades": 0,
+                "trades_per_year": 0
             }
 
-        # 计算统计量：均值、方差、标准差
+        # 计算均值和标准差
         mean_return = sum(trade_returns) / len(trade_returns)
         variance = sum((r - mean_return) ** 2 for r in trade_returns) / (len(trade_returns) - 1)
-        std_dev = math.sqrt(variance)
+        std_return = math.sqrt(variance)
 
-        # 标准差为零时无法计算夏普比率
-        if std_dev == 0:
+        if std_return == 0:
             return {
                 "sharpe_ratio": 0,
                 "annualized_sharpe": 0,
-                "mean_return_per_trade": mean_return,
-                "std_dev": 0,
-                "total_trades": len(trade_returns)
+                "mean_return": mean_return,
+                "std_return": 0,
+                "total_trades": len(trade_returns),
+                "trades_per_year": 0
             }
 
-        # 从实际数据计算平均持仓时间
+        # 计算每笔交易的 Sharpe
         hold_stats = self.calculate_hold_time_stats(fills)
-        avg_hold_days = hold_stats['allTimeAverage']
-
-        # 如果没有持仓数据或持仓时间为0，使用默认值1天（保守估计）
-        if avg_hold_days <= 0:
-            avg_hold_days = 1.0
-
-        # 计算每笔交易的无风险收益率（基于实际平均持仓时间）
+        avg_hold_days = hold_stats['allTimeAverage'] if hold_stats['allTimeAverage'] > 0 else 1.0
         trade_rf_rate = (1 + risk_free_rate) ** (avg_hold_days / 365) - 1
 
-        # 计算每笔交易的夏普比率
-        sharpe_per_trade = (mean_return - trade_rf_rate) / std_dev
+        sharpe_per_trade = (mean_return - trade_rf_rate) / std_return
 
-        # 推算年交易次数（用于年化）
-        first_trade_time = next((f['time'] for f in fills if float(f.get('closedPnl', 0)) != 0), 0)
-        last_trade_time = next((f['time'] for f in reversed(fills) if float(f.get('closedPnl', 0)) != 0), 0)
-
-        if first_trade_time and last_trade_time:
-            days = (last_trade_time - first_trade_time) / 1000 / 86400
+        # 计算年交易次数
+        if len(trade_times) >= 2:
+            first_time = min(trade_times)
+            last_time = max(trade_times)
+            days = (last_time - first_time) / 1000 / 86400
             trades_per_year = len(trade_returns) / days * 365 if days > 0 else 365
         else:
-            trades_per_year = 365  # 加密货币市场7×24小时交易，使用365天
+            trades_per_year = 365
 
-        # 年化夏普比率 = 每笔交易夏普 × sqrt(年交易次数)
+        # 年化 Sharpe
         annualized_sharpe = sharpe_per_trade * math.sqrt(trades_per_year)
 
         return {
             "sharpe_ratio": sharpe_per_trade,
             "annualized_sharpe": annualized_sharpe,
-            "mean_return_per_trade": mean_return,
-            "std_dev": std_dev,
-            "total_trades": len(trade_returns)
+            "mean_return": mean_return,
+            "std_return": std_return,
+            "total_trades": len(trade_returns),
+            "trades_per_year": trades_per_year
         }
 
-    def calculate_max_drawdown_on_capital(self, fills: List[Dict], true_capital: float) -> Dict[str, float]:
+    def calculate_max_drawdown_on_trades(self, fills: List[Dict]) -> Dict[str, float]:
         """
-        基于真实本金计算最大回撤（推荐方法）
+        基于单笔交易收益率计算最大回撤（不依赖本金）
 
-        关键改进：使用真实本金而非持仓价值计算收益率，完全不受杠杆影响
+        使用复利计算累计收益率曲线，追踪峰谷
 
         参数：
             fills: 成交记录列表
-            true_capital: 真实本金（充值 - 提现 + 外部转入 - 外部转出）
 
         返回：
-            字典，包含：
             - max_drawdown_pct: 最大回撤百分比
-            - peak_return: 峰值累计收益率（百分比）
-            - trough_return: 谷底累计收益率（百分比）
-            - peak_date: 峰值发生日期
-            - trough_date: 谷底发生日期
-            - total_trades: 分析的交易数量
-
-        算法说明：
-            1. 每笔交易收益率 = closedPnL / true_capital（不是 position_value）
-            2. 构建累计收益率序列（复利计算）
-            3. 追踪峰值，计算每个点相对峰值的回撤
-            4. 记录最大回撤及对应的峰值和谷底
-
-        优势：
-            - ✅ 不受杠杆影响，真实反映风险
-            - ✅ 与 Sharpe Ratio 计算逻辑一致
-            - ✅ 不受出入金影响
-            - ✅ 反映真实的资金使用效率
-
-        为什么使用真实本金？
-            - 10倍杠杆：投入 $100，持仓价值 $1000
-            - 亏损 $50：
-              * 旧算法：-50/1000 = -5%（❌ 严重低估）
-              * 新算法：-50/100 = -50%（✅ 真实风险）
+            - peak_return: 峰值累计收益率
+            - trough_return: 谷底累计收益率
+            - peak_date: 峰值日期
+            - trough_date: 谷底日期
+            - total_trades: 交易数量
+            - cumulative_return: 总累计收益率
         """
-        if true_capital <= 0:
-            return {
-                "max_drawdown_pct": 0,
-                "peak_return": 0,
-                "trough_return": 0,
-                "peak_date": "N/A",
-                "trough_date": "N/A",
-                "total_trades": 0
-            }
-
         trade_returns = []
-        trade_times = []  # 记录每笔交易的时间戳
+        trade_times = []
 
-        # 提取每笔平仓交易的收益率和时间
         for fill in fills:
             closed_pnl = float(fill.get('closedPnl', 0))
-
-            # 只分析平仓交易
             if closed_pnl == 0:
                 continue
 
-            # ✅ 关键改进：使用真实本金计算收益率
-            trade_return = closed_pnl / true_capital
+            sz = float(fill.get('sz', 0))
+            px = float(fill.get('px', 0))
+            notional_value = abs(sz) * px
 
-            # 限制单笔收益率范围：[-0.99, 10.0]（防止极端值）
-            # -0.99 = -99%（最多亏完）
-            # 10.0 = 1000%（合理的最大盈利上限）
-            trade_return = max(-0.99, min(trade_return, 10.0))
-            trade_returns.append(trade_return)
-            trade_times.append(fill.get('time', 0))  # 记录时间戳
+            if notional_value > 0:
+                trade_return = closed_pnl / notional_value
+                trade_returns.append(trade_return)
+                trade_times.append(fill.get('time', 0))
 
-        # 数据不足时返回零值
         if len(trade_returns) < 2:
             return {
                 "max_drawdown_pct": 0,
@@ -1140,50 +841,39 @@ class ApexCalculator:
                 "trough_return": 0,
                 "peak_date": "N/A",
                 "trough_date": "N/A",
-                "total_trades": 0
+                "total_trades": 0,
+                "cumulative_return": 0
             }
 
-        # 构建累计收益率序列（复利计算，带上限保护）
+        # 构建累计收益率序列（复利）
         cumulative_returns = []
-        cumulative = 1.0  # 从1.0开始（代表100%本金）
-        MAX_CUMULATIVE = 10000.0  # 最大累计收益倍数（10000倍 = 1000000%）
+        cumulative = 1.0
 
         for ret in trade_returns:
-            cumulative *= (1 + ret)  # 复利累积
-            # 防止数值溢出：限制累计收益上限
-            cumulative = min(cumulative, MAX_CUMULATIVE)
+            cumulative *= (1 + ret)
             cumulative_returns.append(cumulative)
 
         # 计算最大回撤
-        peak = cumulative_returns[0]  # 初始峰值
-        peak_index = 0  # 峰值位置
-        max_drawdown = 0  # 最大回撤
-        trough_value = peak  # 谷底值
-        trough_index = 0  # 谷底位置
+        peak = cumulative_returns[0]
+        peak_index = 0
+        max_drawdown = 0
+        trough_value = peak
+        trough_index = 0
 
         for i, value in enumerate(cumulative_returns):
-            # 更新峰值
             if value > peak:
                 peak = value
                 peak_index = i
 
-            # 计算当前回撤 = (峰值 - 当前值) / 峰值
-            drawdown = (peak - value) / peak * 100 if peak > 0 else 0
+            drawdown = (peak - value) / peak
 
-            # 更新最大回撤和谷底
             if drawdown > max_drawdown:
                 max_drawdown = drawdown
                 trough_value = value
                 trough_index = i
 
-        # 限制最大回撤不超过100%
-        max_drawdown = min(max_drawdown, 100.0)
-
         # 格式化日期
-        from datetime import datetime
-
-        def format_date(timestamp_ms: int) -> str:
-            """将毫秒时间戳转换为日期字符串"""
+        def format_date(timestamp_ms):
             if timestamp_ms > 0:
                 try:
                     dt = datetime.fromtimestamp(timestamp_ms / 1000)
@@ -1196,12 +886,120 @@ class ApexCalculator:
         trough_date = format_date(trade_times[trough_index])
 
         return {
-            "max_drawdown_pct": max_drawdown,
-            "peak_return": (peak - 1) * 100,  # 转换为百分比
+            "max_drawdown_pct": max_drawdown * 100,
+            "peak_return": (peak - 1) * 100,
             "trough_return": (trough_value - 1) * 100,
             "peak_date": peak_date,
             "trough_date": trough_date,
-            "total_trades": len(trade_returns)
+            "total_trades": len(trade_returns),
+            "cumulative_return": (cumulative - 1) * 100
+        }
+
+    def calculate_return_metrics_on_trades(self, fills: List[Dict]) -> Dict[str, float]:
+        """
+        基于单笔交易收益率计算累计和年化收益率（不依赖本金）
+
+        参数：
+            fills: 成交记录列表
+
+        返回：
+            - cumulative_return: 累计收益率（复利）
+            - annualized_return: 年化收益率
+            - trading_days: 交易天数
+            - annualized_return_valid: 年化收益率是否可靠
+            - annualized_return_warnings: 警告列表
+        """
+        trade_returns = []
+        trade_times = []
+
+        for fill in fills:
+            closed_pnl = float(fill.get('closedPnl', 0))
+            if closed_pnl == 0:
+                continue
+
+            sz = float(fill.get('sz', 0))
+            px = float(fill.get('px', 0))
+            notional_value = abs(sz) * px
+
+            if notional_value > 0:
+                trade_return = closed_pnl / notional_value
+                trade_returns.append(trade_return)
+                trade_times.append(fill.get('time', 0))
+
+        if len(trade_returns) < 1:
+            return {
+                "cumulative_return": 0,
+                "annualized_return": 0,
+                "trading_days": 0,
+                "annualized_return_valid": False,
+                "annualized_return_warnings": ["NO_TRADES"]
+            }
+
+        # 计算累计收益率（复利）
+        cumulative = 1.0
+        for ret in trade_returns:
+            cumulative *= (1 + ret)
+        cumulative_return = (cumulative - 1) * 100
+
+        # 计算交易天数
+        if len(trade_times) >= 2:
+            first_time = min(trade_times)
+            last_time = max(trade_times)
+            trading_days = (last_time - first_time) / 1000 / 86400
+        else:
+            trading_days = 0
+
+        # 计算年化收益率（带溢出保护）
+        annualized_return = 0
+        annualized_return_valid = True
+        annualized_return_warnings = []
+
+        if trading_days > 0:
+            try:
+                annual_factor = 365.0 / trading_days
+
+                # 分级警告而非硬性拒绝
+                if trading_days < 1:
+                    annualized_return_valid = False
+                    annualized_return_warnings.append("LESS_THAN_1_DAY")
+                elif trading_days < 7:
+                    annualized_return_valid = False
+                    annualized_return_warnings.append("LESS_THAN_7_DAYS")
+                elif trading_days < 30:
+                    annualized_return_valid = False
+                    annualized_return_warnings.append("LESS_THAN_30_DAYS")
+
+                # 计算年化收益率
+                if annual_factor <= 100:  # 交易天数 >= 3.65 天
+                    annualized_return = (math.pow(cumulative, annual_factor) - 1) * 100
+
+                    # 检查极端值
+                    if abs(annualized_return) > 5000:
+                        annualized_return_valid = False
+                        annualized_return_warnings.append("EXTREME_RETURN_VALUE")
+                    elif abs(annualized_return) > 1000:
+                        annualized_return_valid = False
+                        annualized_return_warnings.append("VERY_HIGH_RETURN_VALUE")
+                else:
+                    # 交易天数太短，标记但仍计算
+                    annualized_return = (math.pow(cumulative, annual_factor) - 1) * 100
+                    annualized_return_valid = False
+                    annualized_return_warnings.append("VERY_SHORT_PERIOD")
+
+            except (OverflowError, ValueError):
+                annualized_return = 0
+                annualized_return_valid = False
+                annualized_return_warnings.append("CALCULATION_ERROR")
+        else:
+            annualized_return_valid = False
+            annualized_return_warnings.append("NO_TIME_SPAN")
+
+        return {
+            "cumulative_return": cumulative_return,
+            "annualized_return": annualized_return,
+            "trading_days": trading_days,
+            "annualized_return_valid": annualized_return_valid,
+            "annualized_return_warnings": annualized_return_warnings
         }
 
 

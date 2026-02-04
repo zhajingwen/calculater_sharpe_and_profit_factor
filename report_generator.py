@@ -7,6 +7,20 @@ from typing import Dict
 from datetime import datetime
 
 
+def format_profit_factor(pf: float) -> str:
+    """格式化 Profit Factor 显示
+
+    Args:
+        pf: profit_factor 数值
+
+    Returns:
+        str: 格式化后的字符串，>= 1000 显示为 "1000+"
+    """
+    if pf >= 1000:
+        return "1000+"
+    return f"{pf:.4f}"
+
+
 def generate_markdown_report(results: Dict, user_address: str, filename: str = "trading_report.md") -> str:
     """
     生成 Markdown 格式的交易分析报告
@@ -33,14 +47,20 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
     if not fills:
         return "# 分析报告\n\n❌ 无法获取交易数据"
 
-    # 使用基于真实本金的指标
-    sharpe_on_capital = results.get('sharpe_on_capital', {})
-    trade_dd = results.get('max_drawdown_on_capital', {
+    # 使用基于交易收益率的指标
+    sharpe_on_trades = results.get('sharpe_on_trades', {})
+    trade_dd = results.get('max_drawdown_on_trades', {
         "max_drawdown_pct": 0,
         "peak_return": 0,
         "trough_return": 0,
-        "total_trades": 0
+        "total_trades": 0,
+        "cumulative_return": 0
     })
+    return_metrics_on_trades = results.get('return_metrics_on_trades', {})
+
+    # 获取并格式化 profit_factor
+    profit_factor = results.get('profit_factor', 0)
+    pf_display = format_profit_factor(profit_factor)
 
     # 生成 Markdown 内容
     md_content = f"""# 交易分析报告
@@ -51,28 +71,32 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
 ---
 
-## 📈 核心指标（交易级别 - 推荐使用）
+## 📈 核心指标（基于单笔交易收益率）
 
-> ✅ 这些指标完全不受出入金影响，准确反映策略真实表现
+> ✅ 这些指标不依赖本金数据，准确反映交易策略表现
 
-### Sharpe Ratio（风险调整收益）- 基于真实本金
+### Sharpe Ratio（风险调整收益）
 
 | 指标 | 数值 | 说明 |
 |------|------|------|
-| 年化 Sharpe Ratio | **{sharpe_on_capital.get('annualized_sharpe', 0):.2f}** | {'✅ 优秀' if sharpe_on_capital.get('annualized_sharpe', 0) > 1 else '⚠️ 偏低'} |
-| 每笔交易 Sharpe | {sharpe_on_capital.get('sharpe_ratio', 0):.4f} | 单笔交易风险调整收益 |
-| 平均每笔收益率 | {sharpe_on_capital.get('mean_return_per_trade', 0):.4%} | 相对真实本金 |
-| 收益率标准差 | {sharpe_on_capital.get('std_dev', 0):.4%} | 波动性指标 |
-| 分析交易数 | {sharpe_on_capital.get('total_trades', 0)} | 样本数量 |
+| 年化 Sharpe Ratio | **{sharpe_on_trades.get('annualized_sharpe', 0):.2f}** | {'✅ 优秀' if sharpe_on_trades.get('annualized_sharpe', 0) > 1 else '⚠️ 偏低'} |
+| 每笔交易 Sharpe | {sharpe_on_trades.get('sharpe_ratio', 0):.4f} | 单笔交易风险调整收益 |
+| 平均每笔收益率 | {sharpe_on_trades.get('mean_return', 0):.2%} | 相对持仓价值 |
+| 收益率标准差 | {sharpe_on_trades.get('std_return', 0):.2%} | 波动性指标 |
 
-**计算方法**: 每笔收益率 = closedPnL / 真实本金
+**计算方法**:
+```
+单笔收益率 = closedPnL / (|sz| × px)
+持仓价值 = |sz| × px（该笔交易的名义价值）
+```
 
 **优势**:
-- ✅ 不受杠杆影响，真实反映风险收益比
-- ✅ 与累计收益率计算逻辑一致
-- ✅ 反映真实的资金使用效率
+- ✅ 完全独立：每笔交易自给自足
+- ✅ 符合金融标准：基于收益率而非绝对金额
+- ✅ 准确可靠：使用复利计算累计收益率
+- ✅ 不受出入金影响：与账本记录无关
 
-**评级**: {'✅ 优秀的风险调整收益' if sharpe_on_capital.get('annualized_sharpe', 0) > 1 else '⚠️ 正收益但风险较高' if sharpe_on_capital.get('annualized_sharpe', 0) > 0 else '❌ 负的风险调整收益'}
+**评级**: {'✅ 优秀的风险调整收益' if sharpe_on_trades.get('annualized_sharpe', 0) > 1 else '⚠️ 正收益但风险较高' if sharpe_on_trades.get('annualized_sharpe', 0) > 0 else '❌ 负的风险调整收益'}
 
 ### Max Drawdown（最大回撤）
 
@@ -92,40 +116,55 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
 | 指标 | 数值 |
 |------|------|
-| Profit Factor | {results.get('profit_factor', 0):.4f} |
+| Profit Factor | {pf_display} |
 | Win Rate | {win_rate_data.get('winRate', 0):.2f}% |
 | Direction Bias | {win_rate_data.get('bias', 0):.2f}% |
 | Total Trades | {win_rate_data.get('totalTrades', 0)} |
 | Avg Hold Time | {hold_time_stats.get('allTimeAverage', 0):.2f} 天 |
 
----
+### 收益率指标
+
+| 指标 | 数值 |
+|------|------|
+| 累计收益率 | **{return_metrics_on_trades.get('cumulative_return', 0):.2f}%** |
+| 年化收益率 | {return_metrics_on_trades.get('annualized_return', 0):.2f}% |
+| 交易天数 | {return_metrics_on_trades.get('trading_days', 0):.1f} 天 |
 
 ---
 
 ## 💡 关于指标计算
 
-### Sharpe Ratio 计算方法
+### 为什么不依赖本金？
 
-**我们使用的方法**:
+传统方法需要准确的本金数据，但实际中：
+- ❌ 账本记录可能不完整（无 deposit 记录）
+- ❌ 本金可能为负（转出 > 转入）
+- ❌ 出入金会干扰收益率计算
+
+### 新方法的优势
+
+✅ **完全独立**: 每笔交易自给自足
+✅ **符合金融标准**: 基于收益率而非绝对金额
+✅ **准确可靠**: 使用复利计算累计收益率
+✅ **不受出入金影响**: 与账本记录无关
+
+### 计算公式
+
+**单笔交易收益率**:
 ```
-每笔交易收益率 = closedPnL / 真实本金
-Sharpe Ratio = (平均收益率 - 无风险利率) / 收益率标准差
-年化 Sharpe = 每笔 Sharpe × sqrt(年交易次数)
+收益率 = closedPnL / (|sz| × px)
+其中：|sz| × px = 该笔交易的持仓价值（名义价值）
 ```
 
-**为什么这样计算？**
-
-1. ✅ **不受杠杆影响** - 真实反映风险收益比
-2. ✅ **不受出入金影响** - 使用校正后的真实本金
-3. ✅ **逻辑一致** - 与累计收益率计算方法一致
-4. ✅ **反映资金效率** - 准确评估策略表现
-
-**真实本金的计算**:
+**累计收益率**（复利）:
 ```
-真实本金 = 充值 - 提现 + 外部转入 Spot - 外部转出
+累计收益率 = ∏(1 + 单笔收益率) - 1
 ```
 
-这个方法确保了收益率指标的准确性和可比性。
+**年化收益率**:
+```
+年化收益率 = (1 + 累计收益率)^(365/交易天数) - 1
+```
 
 ---
 
@@ -142,36 +181,6 @@ Sharpe Ratio = (平均收益率 - 无风险利率) / 收益率标准差
 | ├─ 已实现盈亏 | ${results.get('total_realized_pnl', 0):,.2f} |
 | └─ 未实现盈亏 | ${position_analysis.get('total_unrealized_pnl', 0):,.2f} |
 
----
-
-## 💵 本金与收益率
-
-### 真实本金计算（算法 2: 完整版本）
-
-| 项目 | 数值 | 说明 |
-|------|------|------|
-| **真实本金** | **${results.get('capital_info', {}).get('true_capital', 0):,.2f}** | 充值 - 提现 + 外部转入 - 外部转出 |
-| ├─ 总充值 | ${results.get('capital_info', {}).get('total_deposits', 0):,.2f} | Deposit 操作 |
-| ├─ 总提现 | -${results.get('capital_info', {}).get('total_withdrawals', 0):,.2f} | Withdraw 操作 |
-| ├─ 外部转入 Spot | +${results.get('capital_info', {}).get('external_to_spot', 0):,.2f} | 别人通过 Send 转入 |
-| └─ 外部转出 | -${results.get('capital_info', {}).get('external_out', 0):,.2f} | 通过 Send 转给别人 |
-
-> ⚠️ **注意**: 已排除 Perp ↔ Spot 内部转账（不影响总资金）
-
-### 收益率指标
-
-| 项目 | 数值 |
-|------|------|
-| **累计收益率** | **{results.get('return_metrics', {}).get('cumulative_return', 0):.2f}%** |
-| **年化收益率** | **{results.get('return_metrics', {}).get('annualized_return', 0):.2f}%**{' ⚠️ (交易天数<30天,仅供参考)' if results.get('return_metrics', {}).get('trading_days', 0) < 30 else ''} |
-| 交易净盈利 | ${results.get('return_metrics', {}).get('net_profit_trading', 0):,.2f} (基于累计总盈亏) |
-| 账户净增长 | ${results.get('return_metrics', {}).get('net_profit_account', 0):,.2f} (当前价值-本金) |
-| 交易天数 | {results.get('return_metrics', {}).get('trading_days', 0):.1f} 天 |
-
-> ℹ️ **盈亏口径说明**：
-> - **交易净盈利**：基于所有成交记录的 closedPnL + 未实现盈亏，准确反映交易策略表现
-> - **账户净增长**：当前账户总价值 - 真实本金，包含所有资金变动
-> - **差异原因**：可能包含 funding fee（资金费率）、空投、外部转账等非交易盈亏
 
 ---
 
@@ -194,12 +203,16 @@ Sharpe Ratio = (平均收益率 - 无风险利率) / 收益率标准差
 
     # 添加优势
     advantages = []
-    if sharpe_on_capital.get('annualized_sharpe', 0) > 1:
-        advantages.append(f"- **优秀的风险调整收益** (Sharpe Ratio = {sharpe_on_capital['annualized_sharpe']:.2f} > 1.0)")
-    if sharpe_on_capital.get('mean_return_per_trade', 0) > 0:
-        advantages.append(f"- **正期望策略** (每笔平均收益 = {sharpe_on_capital['mean_return_per_trade']:.4%})")
-    if results.get('profit_factor', 0) > 1:
-        advantages.append(f"- **盈利策略** (Profit Factor = {results.get('profit_factor', 0):.2f} > 1.0)")
+    if sharpe_on_trades.get('annualized_sharpe', 0) > 1:
+        advantages.append(f"- **优秀的风险调整收益** (Sharpe Ratio = {sharpe_on_trades['annualized_sharpe']:.2f} > 1.0)")
+    if sharpe_on_trades.get('mean_return', 0) > 0:
+        advantages.append(f"- **正期望策略** (每笔平均收益 = {sharpe_on_trades['mean_return']:.2%})")
+
+    # Profit Factor 评估
+    if profit_factor >= 1000:
+        advantages.append(f"- **极优秀盈利策略** (Profit Factor = 1000+，无亏损交易)")
+    elif profit_factor > 1:
+        advantages.append(f"- **盈利策略** (Profit Factor = {profit_factor:.2f} > 1.0)")
 
     if advantages:
         md_content += "\n".join(advantages)
@@ -251,21 +264,22 @@ Sharpe Ratio = (平均收益率 - 无风险利率) / 收益率标准差
 
 ## 📚 说明
 
-### 关于交易级别指标
+### 关于基于交易收益率的指标
 
 **计算方法**:
 ```
-每笔交易收益率 = closedPnL / true_capital (真实本金)
+单笔收益率 = closedPnL / (|sz| × px)
 Sharpe Ratio = (平均收益率 - 无风险利率) / 收益率标准差
 Max Drawdown = 基于累计收益率序列计算
+累计收益率 = ∏(1 + 单笔收益率) - 1
 ```
 
 **优势**:
-- ✅ 不受杠杆影响，真实反映风险收益比
-- ✅ 不受存取款操作影响
-- ✅ 与累计收益率计算逻辑一致
-- ✅ 反映真实的资金使用效率
-- 可跨账户、跨时期对比
+- ✅ 完全独立：每笔交易自给自足，不需要外部本金数据
+- ✅ 符合金融标准：基于收益率而非绝对金额
+- ✅ 准确可靠：使用复利计算累计收益率
+- ✅ 不受出入金影响：与账本记录无关
+- ✅ 可跨账户、跨时期对比
 
 ### 数据来源
 
@@ -304,29 +318,42 @@ def generate_summary_text(results: Dict) -> str:
     if not fills:
         return "无法获取交易数据"
 
-    # 使用基于真实本金的指标
-    sharpe_on_capital = results.get('sharpe_on_capital', {})
-    trade_dd = results.get('max_drawdown_on_capital', {
+    # 使用基于交易收益率的指标
+    sharpe_on_trades = results.get('sharpe_on_trades', {})
+    trade_dd = results.get('max_drawdown_on_trades', {
         "max_drawdown_pct": 0,
         "peak_return": 0,
         "trough_return": 0,
-        "total_trades": 0
+        "total_trades": 0,
+        "cumulative_return": 0
     })
+
+    # 获取并格式化 profit_factor
+    profit_factor = results.get('profit_factor', 0.0)
+    pf_display = format_profit_factor(profit_factor)
+
+    # 判断盈利能力
+    if profit_factor >= 1000:
+        profit_status = '✅ 极优秀（无亏损）'
+    elif profit_factor > 1:
+        profit_status = '✅ 盈利'
+    else:
+        profit_status = '❌ 亏损'
 
     summary = f"""
 📊 交易分析摘要
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✅ 核心指标（交易级别）
-  • Sharpe Ratio: {sharpe_on_capital.get('annualized_sharpe', 0):.2f}
+✅ 核心指标（基于交易收益率）
+  • Sharpe Ratio: {sharpe_on_trades.get('annualized_sharpe', 0):.2f}
   • Max Drawdown: {trade_dd['max_drawdown_pct']:.2f}%
-  • Profit Factor: {results.get('profit_factor', 0):.4f}
+  • Profit Factor: {pf_display}
   • Win Rate: {results.get('win_rate', {}).get('winRate', 0):.2f}%
 
 🎯 评级
-  • 风险调整收益: {'✅ 优秀' if sharpe_on_capital.get('annualized_sharpe', 0) > 1 else '⚠️ 偏低'}
+  • 风险调整收益: {'✅ 优秀' if sharpe_on_trades.get('annualized_sharpe', 0) > 1 else '⚠️ 偏低'}
   • 风险等级: {'🔴 高风险' if trade_dd['max_drawdown_pct'] > 50 else '🟡 中等' if trade_dd['max_drawdown_pct'] > 20 else '🟢 低风险'}
-  • 盈利能力: {'✅ 盈利' if results.get('profit_factor', 0) > 1 else '❌ 亏损'}
+  • 盈利能力: {profit_status}
 """
 
     return summary

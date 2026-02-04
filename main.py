@@ -117,12 +117,13 @@ def extract_analysis_data(calculator: ApexCalculator, results: Dict[str, Any],
             user_data = calculator.get_user_data(user_address, force_refresh=False)
             fills = user_data.get('fills', [])
 
-        # 使用基于真实本金的最大回撤（从 results 中获取）
-        trade_dd = results.get('max_drawdown_on_capital', {
+        # 使用基于交易收益率的最大回撤（从 results 中获取）
+        trade_dd = results.get('max_drawdown_on_trades', {
             "max_drawdown_pct": 0,
             "peak_return": 0,
             "trough_return": 0,
-            "total_trades": 0
+            "total_trades": 0,
+            "cumulative_return": 0
         })
 
         return AnalysisResults(
@@ -145,26 +146,25 @@ def display_header() -> None:
     print("\n" + "=" * width)
     print("🚀 Apex Fork - 交易分析系统".center(width - 2))
     print("基于Hyperliquid官方API和Apex Liquid Bot算法".center(width + 14))  # 调整中文字符
-    print("✅ 完全不受出入金影响的准确指标".center(width + 8))
+    print("✅ 基于单笔交易收益率的准确指标（不依赖本金）".center(width + 14))
     print("=" * width)
 
 def display_core_metrics(analysis: AnalysisResults) -> None:
-    """显示核心指标（交易级别）"""
-    print_section("📈 核心指标（交易级别 - 完全不受出入金影响）", width=80)
+    """显示核心指标（基于单笔交易收益率）"""
+    print_section("📈 核心指标（基于单笔交易收益率）", width=80)
 
-    # Sharpe Ratio - 基于真实本金
-    sharpe_on_capital = analysis.raw_results.get('sharpe_on_capital', {})
-    if sharpe_on_capital and sharpe_on_capital.get('total_trades', 0) > 0:
-        print("\n  ┌─ Sharpe Ratio（基于真实本金）")
+    # Sharpe Ratio - 基于交易收益率
+    sharpe_on_trades = analysis.raw_results.get('sharpe_on_trades', {})
+    if sharpe_on_trades and sharpe_on_trades.get('total_trades', 0) > 0:
+        print("\n  ┌─ Sharpe Ratio（基于单笔交易收益率）")
         print("  │")
 
-        # 表格显示 Sharpe 指标
         widths = [28, 18, 28]
         print_table_separator(widths, 'top')
         print_table_row(['指标', '数值', '说明'], widths)
         print_table_separator(widths, 'mid')
 
-        sharpe_val = sharpe_on_capital['annualized_sharpe']
+        sharpe_val = sharpe_on_trades['annualized_sharpe']
         if sharpe_val > 1:
             rating = "✅ 优秀"
         elif sharpe_val > 0:
@@ -177,22 +177,26 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
             widths, ['left', 'right', 'left']
         )
         print_table_row(
-            ['每笔 Sharpe', f"{sharpe_on_capital['sharpe_ratio']:.4f}", '单笔风险调整收益'],
+            ['每笔 Sharpe', f"{sharpe_on_trades['sharpe_ratio']:.4f}", '单笔风险调整收益'],
             widths, ['left', 'right', 'left']
         )
         print_table_row(
-            ['平均每笔收益率', f"{sharpe_on_capital['mean_return_per_trade']:.2%}", '相对真实本金'],
+            ['平均每笔收益率', f"{sharpe_on_trades['mean_return']:.2%}", '相对持仓价值'],
             widths, ['left', 'right', 'left']
         )
         print_table_row(
-            ['收益率标准差', f"{sharpe_on_capital['std_dev']:.2%}", '波动性指标'],
+            ['收益率标准差', f"{sharpe_on_trades['std_return']:.2%}", '波动性指标'],
             widths, ['left', 'right', 'left']
         )
         print_table_separator(widths, 'bottom')
 
-    # Max Drawdown
-    trade_dd = analysis.trade_dd
-    print("\n  ┌─ Max Drawdown（最大回撤）")
+        # 添加说明
+        print("\n  ℹ️  计算方法: 单笔收益率 = closedPnL / (|sz| × px)")
+        print("  ℹ️  持仓价值 = |sz| × px（该笔交易的名义价值）")
+
+    # Max Drawdown - 基于交易收益率
+    trade_dd = analysis.raw_results.get('max_drawdown_on_trades', {})
+    print("\n  ┌─ Max Drawdown（基于累计收益率曲线）")
     print("  │")
 
     widths = [28, 18, 28]
@@ -200,7 +204,7 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
     print_table_row(['指标', '数值', '风险等级/说明'], widths)
     print_table_separator(widths, 'mid')
 
-    dd_pct = trade_dd['max_drawdown_pct']
+    dd_pct = trade_dd.get('max_drawdown_pct', 0)
     if dd_pct < 20:
         risk_level = "🟢 低风险"
     elif dd_pct < 50:
@@ -213,7 +217,7 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
         widths, ['left', 'right', 'left']
     )
     print_table_row(
-        ['峰值累计收益', f"{trade_dd['peak_return']:.2f}%", f"历史最高点"],
+        ['峰值累计收益', f"{trade_dd.get('peak_return', 0):.2f}%", f"历史最高点"],
         widths, ['left', 'right', 'left']
     )
     print_table_row(
@@ -221,7 +225,7 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
         widths, ['left', 'right', 'left']
     )
     print_table_row(
-        ['谷底累计收益', f"{trade_dd['trough_return']:.2f}%", '回撤最低点'],
+        ['谷底累计收益', f"{trade_dd.get('trough_return', 0):.2f}%", '回撤最低点'],
         widths, ['left', 'right', 'left']
     )
     print_table_row(
@@ -239,9 +243,16 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
     print_table_row(['指标', '数值', '说明'], widths)
     print_table_separator(widths, 'mid')
 
+    # Profit Factor 显示：>= 1000 显示为 "1000+"
+    if analysis.profit_factor >= 1000:
+        pf_display = "1000+"
+        pf_status = '✅ 极优秀（无亏损）'
+    else:
+        pf_display = f"{analysis.profit_factor:.4f}"
+        pf_status = '✅ 盈利' if analysis.profit_factor > 1 else '❌ 亏损'
+
     print_table_row(
-        ['Profit Factor', f"{analysis.profit_factor:.4f}",
-         '✅ 盈利' if analysis.profit_factor > 1 else '❌ 亏损'],
+        ['Profit Factor', pf_display, pf_status],
         widths, ['left', 'right', 'left']
     )
     print_table_row(
@@ -296,41 +307,42 @@ def display_account_info(analysis: AnalysisResults) -> None:
     print(f"  │  ├─ 已实现盈亏      ${total_realized_pnl:>12,.2f}")
     print(f"  │  └─ 未实现盈亏      ${total_unrealized_pnl:>12,.2f}")
 
-    # 本金和收益率信息
-    capital_info = raw_results.get('capital_info', {})
-    return_metrics = raw_results.get('return_metrics', {})
+    # 收益率指标（基于交易收益率）
+    return_metrics_on_trades = raw_results.get('return_metrics_on_trades', {})
 
-    print(f"\n  ┌─ 本金与收益率（算法2: 完整版本）")
-    print("  │")
-    print(f"  │  真实本金            ${capital_info.get('true_capital', 0):>12,.2f}")
-    print(f"  │  ├─ 总充值          ${capital_info.get('total_deposits', 0):>12,.2f}")
-    print(f"  │  ├─ 总提现         -${capital_info.get('total_withdrawals', 0):>12,.2f}")
-    print(f"  │  ├─ 外部转入 Spot  +${capital_info.get('external_to_spot', 0):>12,.2f}")
-    print(f"  │  └─ 外部转出       -${capital_info.get('external_out', 0):>12,.2f}")
+    print(f"\n  ┌─ 收益率指标（基于单笔交易收益率）")
     print("  │")
 
-    cumulative_return = return_metrics.get('cumulative_return', 0)
+    cumulative_return = return_metrics_on_trades.get('cumulative_return', 0)
     return_icon = "📈" if cumulative_return >= 0 else "📉"
     print(f"  │  累计收益率 {return_icon}       {cumulative_return:>12.2f}%")
 
-    # 年化收益率显示（始终显示值）
-    annualized_return = return_metrics.get('annualized_return', 0)
-    trading_days = return_metrics.get('trading_days', 0)
-    if trading_days < 30:
-        print(f"  │  年化收益率 ⚠️       {annualized_return:>12.2f}%  (⚠️ 交易天数<30天,仅供参考)")
+    # 年化收益率显示（根据警告显示）
+    annualized_return = return_metrics_on_trades.get('annualized_return', 0)
+    trading_days = return_metrics_on_trades.get('trading_days', 0)
+    warnings = return_metrics_on_trades.get('annualized_return_warnings', [])
+
+    if "LESS_THAN_1_DAY" in warnings:
+        print(f"  │  年化收益率 🔴       {annualized_return:>12.2f}%  (🔴 少于1天，极不可靠)")
+    elif "LESS_THAN_7_DAYS" in warnings:
+        print(f"  │  年化收益率 🔴       {annualized_return:>12.2f}%  (🔴 少于7天，不适合年化)")
+    elif "LESS_THAN_30_DAYS" in warnings:
+        print(f"  │  年化收益率 🟡       {annualized_return:>12.2f}%  (🟡 少于30天，仅供参考)")
+    elif "EXTREME_RETURN_VALUE" in warnings:
+        print(f"  │  年化收益率 🟡       {annualized_return:>12.2f}%  (🟡 极高值，需核实)")
+    elif "VERY_HIGH_RETURN_VALUE" in warnings:
+        print(f"  │  年化收益率 🟡       {annualized_return:>12.2f}%  (🟡 较高值，需验证)")
     else:
-        print(f"  │  年化收益率          {annualized_return:>12.2f}%")
+        print(f"  │  年化收益率 ✅       {annualized_return:>12.2f}%")
 
     print("  │")
-    print(f"  │  ├─ 交易净盈利      ${return_metrics.get('net_profit_trading', 0):>12,.2f}  (基于累计总盈亏)")
-    print(f"  │  ├─ 账户净增长      ${return_metrics.get('net_profit_account', 0):>12,.2f}  (当前价值-本金)")
-    print(f"  │  └─ 交易天数        {return_metrics.get('trading_days', 0):>12.1f}  天")
+    print(f"  │  交易天数            {trading_days:>12.1f}  天")
+    print(f"  │  交易笔数            {analysis.win_rate_data.get('totalTrades', 0):>12}  笔")
 
-    # 显示差异说明
-    diff = return_metrics.get('net_profit_account', 0) - return_metrics.get('net_profit_trading', 0)
-    if abs(diff) > 1:
-        print("  │")
-        print(f"  │  ℹ️  差异说明:       ${diff:>12,.2f}  (可能包含 funding fee、空投等)")
+    print("\n  ℹ️  说明:")
+    print("  • 收益率基于单笔交易的持仓价值计算，不依赖外部本金")
+    print("  • 累计收益率使用复利计算：∏(1 + 单笔收益率) - 1")
+    print("  • 年化收益率在交易天数 >= 30 天时较为可靠")
 
 def display_hold_time_stats(analysis: AnalysisResults) -> None:
     """显示持仓时间统计"""
@@ -378,18 +390,22 @@ def display_strategy_evaluation(analysis: AnalysisResults) -> None:
     print_section("🎯 策略评估总结")
 
     # 获取 Sharpe Ratio 数据
-    sharpe_on_capital = analysis.raw_results.get('sharpe_on_capital', {})
+    sharpe_on_trades = analysis.raw_results.get('sharpe_on_trades', {})
 
     # 优势
     print("\n✅ 优势:")
     advantages = []
 
-    if sharpe_on_capital.get('annualized_sharpe', 0) > 1:
+    if sharpe_on_trades.get('annualized_sharpe', 0) > 1:
         advantages.append("优秀的风险调整收益（Sharpe > 1）")
-    if sharpe_on_capital.get('mean_return_per_trade', 0) > 0:
-        pct = sharpe_on_capital['mean_return_per_trade']
-        advantages.append(f"正期望策略（每笔平均 {pct:.4%}）")
-    if analysis.profit_factor > 1:
+    if sharpe_on_trades.get('mean_return', 0) > 0:
+        pct = sharpe_on_trades['mean_return']
+        advantages.append(f"正期望策略（每笔平均 {pct:.2%}）")
+
+    # Profit Factor 评估
+    if analysis.profit_factor >= 1000:
+        advantages.append(f"极优秀盈利策略（Profit Factor = 1000+，无亏损交易）")
+    elif analysis.profit_factor > 1:
         advantages.append(f"盈利策略（Profit Factor = {analysis.profit_factor:.2f}）")
 
     if advantages:
@@ -402,8 +418,9 @@ def display_strategy_evaluation(analysis: AnalysisResults) -> None:
     print("\n⚠️  风险:")
     risks = []
 
-    if analysis.trade_dd['max_drawdown_pct'] > 50:
-        pct = analysis.trade_dd['max_drawdown_pct']
+    trade_dd = analysis.raw_results.get('max_drawdown_on_trades', {})
+    if trade_dd.get('max_drawdown_pct', 0) > 50:
+        pct = trade_dd['max_drawdown_pct']
         risks.append(f"极高回撤风险（{pct:.2f}%）")
     if analysis.win_rate_data.get('winRate', 0) < 50:
         wr = analysis.win_rate_data.get('winRate', 0)
@@ -419,7 +436,7 @@ def display_strategy_evaluation(analysis: AnalysisResults) -> None:
     print("\n💡 改进建议:")
     suggestions = []
 
-    if analysis.trade_dd['max_drawdown_pct'] > 50:
+    if trade_dd.get('max_drawdown_pct', 0) > 50:
         suggestions.extend([
             "考虑降低仓位大小",
             "添加更严格的止损机制"
@@ -438,10 +455,15 @@ def display_usage_guide() -> None:
     print("\n  使用步骤:")
     print("    1. 将 user_address 替换为真实的 Hyperliquid 用户地址")
     print("    2. 确保网络连接正常")
-    print("    3. 推荐使用交易级别指标（不受出入金影响）")
+    print("    3. 所有指标基于单笔交易收益率计算（不依赖本金数据）")
     print("    4. 使用 --report 参数生成 Markdown 报告")
     print("    5. 使用 --verbose 显示详细日志")
     print("    6. 使用 --debug 显示调试信息")
+
+    print("\n  💡 核心算法:")
+    print("    • 单笔收益率 = closedPnL / (|sz| × px)")
+    print("    • 完全独立，不受出入金影响")
+    print("    • 符合金融标准，使用复利计算")
 
     print("\n  🔗 相关链接:")
     print("    • API 文档: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api")
