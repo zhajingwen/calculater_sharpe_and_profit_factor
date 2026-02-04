@@ -1182,12 +1182,17 @@ class ApexCalculator:
 
         返回：
             - mean_return: 平均每笔收益率
+            - min_return_7d: 最近7天单笔最小收益率
             - total_trades: 总交易数
             - trading_days: 交易天数
         """
         trade_returns = []
         trade_pnls = []
         trade_times = []
+
+        # 最近7天的收益率（用于计算 min_return_7d）
+        seven_days_ago_ms = (datetime.now() - timedelta(days=7)).timestamp() * 1000
+        trade_returns_7d = []
 
         for fill in fills:
             closed_pnl = float(fill.get('closedPnl', 0))
@@ -1197,16 +1202,22 @@ class ApexCalculator:
             sz = float(fill.get('sz', 0))
             px = float(fill.get('px', 0))
             notional_value = abs(sz) * px
+            trade_time = fill.get('time', 0)
 
             if notional_value > 0:
                 trade_return = closed_pnl / notional_value
                 trade_returns.append(trade_return)
                 trade_pnls.append(closed_pnl)
-                trade_times.append(fill.get('time', 0))
+                trade_times.append(trade_time)
+
+                # 统计最近7天的收益率
+                if trade_time >= seven_days_ago_ms:
+                    trade_returns_7d.append(trade_return)
 
         if len(trade_returns) < 1:
             return {
                 "mean_return": 0,
+                "min_return_7d": 0,
                 "total_trades": 0,
                 "trading_days": 0,
                 "total_pnl": 0
@@ -1214,6 +1225,7 @@ class ApexCalculator:
 
         # 简单统计
         mean_return = sum(trade_returns) / len(trade_returns)
+        min_return_7d = min(trade_returns_7d) if trade_returns_7d else 0  # 最近7天单笔最小收益率
         total_pnl = sum(trade_pnls)
 
         # 计算交易天数
@@ -1226,6 +1238,7 @@ class ApexCalculator:
 
         return {
             "mean_return": mean_return,
+            "min_return_7d": min_return_7d,
             "total_trades": len(trade_returns),
             "trading_days": trading_days,
             "total_pnl": total_pnl

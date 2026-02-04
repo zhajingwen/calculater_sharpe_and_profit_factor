@@ -37,6 +37,7 @@ class AddressMetrics:
     # 收益率指标
     mean_return: float = 0.0
     std_return: float = 0.0
+    min_return_7d: float = 0.0  # 最近7天单笔最小收益率
     trades_per_year: float = 0.0
     trading_days: float = 0.0
 
@@ -113,6 +114,7 @@ def extract_metrics_from_result(result: Dict[str, Any], address: str) -> Address
         # 收益率指标
         mean_return=sharpe_on_trades.get('mean_return', 0),
         std_return=sharpe_on_trades.get('std_return', 0),
+        min_return_7d=return_metrics.get('min_return_7d', 0),
         trades_per_year=sharpe_on_trades.get('trades_per_year', 0),
         trading_days=return_metrics.get('trading_days', 0),
 
@@ -229,6 +231,7 @@ def generate_html_report(
             # 收益率指标
             'mean_return': m.mean_return * 100,  # 转为百分比
             'std_return': m.std_return * 100,
+            'min_return_7d': m.min_return_7d * 100,  # 最近7天单笔最小收益率
             'trades_per_year': m.trades_per_year,
             'trading_days': m.trading_days,
             # 方向偏好
@@ -822,6 +825,7 @@ def generate_html_report(
             // 收益率指标
             {{ key: 'mean_return', label: '平均收益率', format: v => v.toFixed(2) + '%', defaultVisible: true, colorByValue: true }},
             {{ key: 'std_return', label: '收益率标准差', format: v => v.toFixed(2) + '%', defaultVisible: false }},
+            {{ key: 'min_return_7d', label: '7天最小收益率', format: v => v.toFixed(2) + '%', defaultVisible: false, colorByValue: true }},
             {{ key: 'trades_per_year', label: '年交易频率', format: v => v.toFixed(0), defaultVisible: false }},
             {{ key: 'trading_days', label: '交易天数', format: v => v.toFixed(1), defaultVisible: false }},
             // 方向偏好
@@ -1317,7 +1321,9 @@ def generate_html_report_from_batch_results(
                 metrics.mean_return = sharpe_data.get('mean_return', 0)
                 metrics.std_return = sharpe_data.get('std_return', 0)
                 metrics.trades_per_year = sharpe_data.get('trades_per_year', 0)
-                metrics.trading_days = raw.get('return_metrics_on_trades', {}).get('trading_days', 0)
+                return_metrics = raw.get('return_metrics_on_trades', {})
+                metrics.trading_days = return_metrics.get('trading_days', 0)
+                metrics.min_return_7d = return_metrics.get('min_return_7d', 0)
 
                 metrics.bias = win_data.get('bias', 50)
                 metrics.total_positions = pos_data.get('total_positions', 0)
