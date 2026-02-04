@@ -181,10 +181,6 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
             widths, ['left', 'right', 'left']
         )
         print_table_row(
-            ['平均每笔收益率', f"{sharpe_on_trades['mean_return']:.2%}", '相对持仓价值'],
-            widths, ['left', 'right', 'left']
-        )
-        print_table_row(
             ['收益率标准差', f"{sharpe_on_trades['std_return']:.2%}", '波动性指标'],
             widths, ['left', 'right', 'left']
         )
@@ -309,9 +305,15 @@ def display_account_info(analysis: AnalysisResults) -> None:
 
     # 收益率指标（基于交易收益率）
     return_metrics_on_trades = raw_results.get('return_metrics_on_trades', {})
+    sharpe_on_trades = raw_results.get('sharpe_on_trades', {})
 
     print(f"\n  ┌─ 收益率指标（基于单笔交易收益率）")
     print("  │")
+
+    # 平均每笔收益率
+    mean_return = sharpe_on_trades.get('mean_return', 0)
+    mean_return_icon = "📈" if mean_return >= 0 else "📉"
+    print(f"  │  平均每笔收益率 {mean_return_icon}   {mean_return:>12.2%}")
 
     cumulative_return = return_metrics_on_trades.get('cumulative_return', 0)
     return_icon = "📈" if cumulative_return >= 0 else "📉"
