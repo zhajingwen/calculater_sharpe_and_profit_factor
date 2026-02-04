@@ -363,25 +363,28 @@ class ApexCalculator:
         time_diff = end_time - start_time
         actual_hours = time_diff.total_seconds() / 3600
 
-        # 如果起始权益为0，查找最接近起始时间的第一个非零权益
-        # 这种情况在账户刚创建或周期开始时账户为空时会发生
+        # 智能处理起始权益为0的情况
+        # 使用生成器表达式实现懒加载，找到第一个非零权益点就停止
         if start_equity <= 0:
-            # 查找第一个非零权益
-            for i, item in enumerate(account_value_history):
-                equity = safe_float(item[1], 0.0)
-                if equity > 0:
-                    start_equity = equity
-                    start_timestamp_ms = item[0]
-                    start_time = datetime.fromtimestamp(start_timestamp_ms / 1000)
+            try:
+                # 生成器表达式 + next()：最简洁、最高效的查找方式
+                i, (timestamp_ms, equity_str) = next(
+                    (i, item) for i, item in enumerate(account_value_history)
+                    if safe_float(item[1], 0.0) > 0
+                )
 
-                    # 重新计算实际时长
-                    time_diff = end_time - start_time
-                    actual_hours = time_diff.total_seconds() / 3600
+                # 更新起始权益和时间
+                start_equity = safe_float(equity_str, 0.0)
+                start_time = datetime.fromtimestamp(timestamp_ms / 1000)
 
-                    # 同时需要调整PNL（使用对应时间点的PNL）
-                    if i < len(pnl_history):
-                        pnl = safe_float(pnl_history[-1][1], 0.0) - safe_float(pnl_history[i][1], 0.0)
-                    break
+                # 重新计算时长和调整后的PNL
+                actual_hours = (end_time - start_time).total_seconds() / 3600
+                if i < len(pnl_history):
+                    pnl = safe_float(pnl_history[-1][1], 0.0) - safe_float(pnl_history[i][1], 0.0)
+
+            except StopIteration:
+                # 整个周期都没有非零权益
+                pass
 
         # 验证起始权益（如果仍然<=0，说明整个周期都没有资金）
         if start_equity <= 0:
