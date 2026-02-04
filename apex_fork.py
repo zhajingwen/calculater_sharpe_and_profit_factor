@@ -27,10 +27,63 @@ import time
 from typing import List, Dict, Any, Optional, Union
 from decimal import Decimal, getcontext
 from datetime import datetime, timedelta
+from dataclasses import dataclass
 from hyperliquid_api_client import HyperliquidAPIClient, safe_float, safe_int
 
 # 设置高精度小数计算（50位精度）
 getcontext().prec = 50
+
+
+@dataclass
+class ROEMetrics:
+    """
+    ROE指标数据类（支持多时间周期）
+
+    Attributes:
+        period: 时间周期（'24h', '7d', '30d', 'all'）
+        period_label: 周期标签（用于显示）
+        roe_percent: ROE百分比 (例: 2.5 表示 2.5%)
+        start_equity: 起始权益（周期开始时的账户总权益）
+        current_equity: 当前权益（最新的账户总权益）
+        pnl: 该周期的累计PNL
+        start_time: 周期开始时间点
+        end_time: 当前时间点（最新数据时间）
+        is_valid: 数据是否有效（False表示计算失败或数据异常）
+        error_message: 当is_valid=False时的错误信息
+        period_hours: 实际周期小时数
+        expected_hours: 期望的周期小时数（24h=24, 7d=168, 30d=720, all=None）
+        is_sufficient_history: 账户历史是否满足周期要求
+    """
+    period: str
+    period_label: str
+    roe_percent: float
+    start_equity: float
+    current_equity: float
+    pnl: float
+    start_time: datetime
+    end_time: datetime
+    is_valid: bool
+    error_message: Optional[str] = None
+    period_hours: Optional[float] = None
+    expected_hours: Optional[float] = None
+    is_sufficient_history: bool = True
+
+
+@dataclass
+class MultiPeriodROE:
+    """
+    多周期ROE数据类
+
+    Attributes:
+        roe_24h: 24小时ROE
+        roe_7d: 7天ROE
+        roe_30d: 30天ROE
+        roe_all: 历史总ROE
+    """
+    roe_24h: ROEMetrics
+    roe_7d: ROEMetrics
+    roe_30d: ROEMetrics
+    roe_all: ROEMetrics
 
 
 class ApexCalculator:
@@ -230,7 +283,299 @@ class ApexCalculator:
         except Exception as e:
             print(f"✗ 获取保证金摘要失败: {e}")
             return {}
-    
+
+    def _calculate_roe_for_period(
+        self,
+        period_data: Dict[str, Any],
+        period: str,
+        period_label: str,
+        expected_hours: Optional[float]
+    ) -> ROEMetrics:
+        """
+        通用的ROE计算方法（私有方法）
+
+        Args:
+            period_data: Portfolio API返回的单个period数据
+            period: 周期标识（'24h', '7d', '30d', 'all'）
+            period_label: 周期显示标签（'24小时', '7天', '30天', '历史总计'）
+            expected_hours: 期望的小时数（24h=24, 7d=168, 30d=720, all=None）
+
+        Returns:
+            ROEMetrics对象
+        """
+        # 提取pnlHistory和accountValueHistory
+        pnl_history = period_data.get("pnlHistory", [])
+        account_value_history = period_data.get("accountValueHistory", [])
+
+        # 验证数据完整性
+        if not pnl_history:
+            return ROEMetrics(
+                period=period,
+                period_label=period_label,
+                roe_percent=0.0,
+                start_equity=0.0,
+                current_equity=0.0,
+                pnl=0.0,
+                start_time=datetime.now(),
+                end_time=datetime.now(),
+                is_valid=False,
+                error_message="pnlHistory为空",
+                expected_hours=expected_hours
+            )
+
+        if not account_value_history:
+            return ROEMetrics(
+                period=period,
+                period_label=period_label,
+                roe_percent=0.0,
+                start_equity=0.0,
+                current_equity=0.0,
+                pnl=0.0,
+                start_time=datetime.now(),
+                end_time=datetime.now(),
+                is_valid=False,
+                error_message="accountValueHistory为空",
+                expected_hours=expected_hours
+            )
+
+        # 提取关键数据
+        # pnlHistory格式: [[timestamp_ms, cumulative_pnl_str], ...]
+        # accountValueHistory格式: [[timestamp_ms, account_value_str], ...]
+
+        pnl = safe_float(pnl_history[-1][1], 0.0)  # 最新累计PNL
+        start_equity = safe_float(account_value_history[0][1], 0.0)  # 周期开始时的权益
+        current_equity = safe_float(account_value_history[-1][1], 0.0)  # 当前权益
+
+        # 提取时间戳
+        start_timestamp_ms = account_value_history[0][0]
+        end_timestamp_ms = pnl_history[-1][0]
+
+        start_time = datetime.fromtimestamp(start_timestamp_ms / 1000)
+        end_time = datetime.fromtimestamp(end_timestamp_ms / 1000)
+
+        # 计算实际时长
+        time_diff = end_time - start_time
+        actual_hours = time_diff.total_seconds() / 3600
+
+        # 对于allTime，如果起始权益为0，需要找到第一个非零的权益作为起始点
+        if period == 'all' and start_equity <= 0:
+            # 查找第一个非零权益
+            for i, item in enumerate(account_value_history):
+                equity = safe_float(item[1], 0.0)
+                if equity > 0:
+                    start_equity = equity
+                    start_timestamp_ms = item[0]
+                    start_time = datetime.fromtimestamp(start_timestamp_ms / 1000)
+
+                    # 重新计算实际时长
+                    time_diff = end_time - start_time
+                    actual_hours = time_diff.total_seconds() / 3600
+
+                    # 同时需要调整PNL（使用对应时间点的PNL）
+                    if i < len(pnl_history):
+                        pnl = safe_float(pnl_history[-1][1], 0.0) - safe_float(pnl_history[i][1], 0.0)
+                    break
+
+        # 验证起始权益
+        if start_equity <= 0:
+            return ROEMetrics(
+                period=period,
+                period_label=period_label,
+                roe_percent=0.0,
+                start_equity=start_equity,
+                current_equity=current_equity,
+                pnl=pnl,
+                start_time=start_time,
+                end_time=end_time,
+                is_valid=False,
+                error_message=f"起始权益无效: ${start_equity:.2f} (需要>0)",
+                period_hours=actual_hours,
+                expected_hours=expected_hours,
+                is_sufficient_history=False
+            )
+
+        # 计算ROE
+        roe_percent = (pnl / start_equity) * 100
+
+        # 检查账户历史是否足够（对于allTime始终认为足够）
+        if expected_hours is not None:
+            # 允许2%的误差
+            is_sufficient = actual_hours >= expected_hours * 0.98
+            warning_msg = None if is_sufficient else f"账户历史不足{period_label}（实际: {actual_hours:.1f}h），ROE基于实际时长计算"
+        else:
+            # allTime没有期望小时数，始终认为足够
+            is_sufficient = True
+            warning_msg = None
+
+        return ROEMetrics(
+            period=period,
+            period_label=period_label,
+            roe_percent=roe_percent,
+            start_equity=start_equity,
+            current_equity=current_equity,
+            pnl=pnl,
+            start_time=start_time,
+            end_time=end_time,
+            is_valid=True,
+            error_message=warning_msg,
+            period_hours=actual_hours,
+            expected_hours=expected_hours,
+            is_sufficient_history=is_sufficient
+        )
+
+    def calculate_24h_roe(self, user_address: str, force_refresh: bool = False) -> ROEMetrics:
+        """
+        计算24小时ROE (Return on Equity)
+
+        ROE公式：
+            24h ROE (%) = (24h累计PNL / 起始权益) × 100
+
+        其中：
+            - 24h累计PNL = pnlHistory[-1] (最新值)
+            - 起始权益 = accountValueHistory[0] (24小时前的值)
+
+        Args:
+            user_address: 用户钱包地址
+            force_refresh: 是否强制刷新缓存
+
+        Returns:
+            ROEMetrics对象，包含完整的ROE指标数据
+
+        注意：此方法保留用于向后兼容，建议使用calculate_multi_period_roe()
+        """
+        cache_key = f"portfolio_day_{user_address}"
+
+        # 尝试从缓存获取
+        if not force_refresh:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                portfolio_data = cached_data
+            else:
+                portfolio_data = None
+        else:
+            portfolio_data = None
+
+        # 如果缓存未命中，从API获取
+        if portfolio_data is None:
+            try:
+                portfolio_data = self.api_client.get_user_portfolio(user_address)
+                self._set_cache_data(cache_key, portfolio_data)
+            except Exception as e:
+                # API请求失败
+                return ROEMetrics(
+                    period='24h',
+                    period_label='24小时',
+                    roe_percent=0.0,
+                    start_equity=0.0,
+                    current_equity=0.0,
+                    pnl=0.0,
+                    start_time=datetime.now(),
+                    end_time=datetime.now(),
+                    is_valid=False,
+                    error_message=f"API请求失败: {str(e)}",
+                    expected_hours=24.0
+                )
+
+        return self._calculate_roe_for_period(
+            portfolio_data,
+            period='24h',
+            period_label='24小时',
+            expected_hours=24.0
+        )
+
+    def calculate_multi_period_roe(self, user_address: str, force_refresh: bool = False) -> MultiPeriodROE:
+        """
+        计算多周期ROE（24小时、7天、30天、历史总计）
+
+        ROE公式：
+            ROE (%) = (周期累计PNL / 起始权益) × 100
+
+        Args:
+            user_address: 用户钱包地址
+            force_refresh: 是否强制刷新缓存
+
+        Returns:
+            MultiPeriodROE对象，包含所有周期的ROE指标
+
+        注意事项：
+            - 使用5分钟缓存机制
+            - 每个周期独立计算
+            - 历史总计ROE会自动处理起始权益为0的情况
+        """
+        cache_key = f"portfolio_all_{user_address}"
+
+        # 尝试从缓存获取
+        if not force_refresh:
+            cached_data = self._get_cached_data(cache_key)
+            if cached_data:
+                all_periods = cached_data
+            else:
+                all_periods = None
+        else:
+            all_periods = None
+
+        # 如果缓存未命中，从API获取
+        if all_periods is None:
+            try:
+                all_periods = self.api_client.get_user_portfolio_all_periods(user_address)
+                self._set_cache_data(cache_key, all_periods)
+            except Exception as e:
+                # API请求失败，返回所有周期的无效数据
+                error_roe = ROEMetrics(
+                    period='error',
+                    period_label='错误',
+                    roe_percent=0.0,
+                    start_equity=0.0,
+                    current_equity=0.0,
+                    pnl=0.0,
+                    start_time=datetime.now(),
+                    end_time=datetime.now(),
+                    is_valid=False,
+                    error_message=f"API请求失败: {str(e)}"
+                )
+                return MultiPeriodROE(
+                    roe_24h=error_roe,
+                    roe_7d=error_roe,
+                    roe_30d=error_roe,
+                    roe_all=error_roe
+                )
+
+        # 计算各个周期的ROE
+        roe_24h = self._calculate_roe_for_period(
+            all_periods.get("day", {}),
+            period='24h',
+            period_label='24小时',
+            expected_hours=24.0
+        )
+
+        roe_7d = self._calculate_roe_for_period(
+            all_periods.get("week", {}),
+            period='7d',
+            period_label='7天',
+            expected_hours=168.0  # 7 * 24
+        )
+
+        roe_30d = self._calculate_roe_for_period(
+            all_periods.get("month", {}),
+            period='30d',
+            period_label='30天',
+            expected_hours=720.0  # 30 * 24
+        )
+
+        roe_all = self._calculate_roe_for_period(
+            all_periods.get("allTime", {}),
+            period='all',
+            period_label='历史总计',
+            expected_hours=None  # 历史总计没有固定期望小时数
+        )
+
+        return MultiPeriodROE(
+            roe_24h=roe_24h,
+            roe_7d=roe_7d,
+            roe_30d=roe_30d,
+            roe_all=roe_all
+        )
+
     def calculate_profit_factor(self, fills: List[Dict], asset_positions: Optional[List[Dict]] = None) -> float:
         """
         计算盈亏因子（基于Apex Liquid Bot算法）
@@ -392,6 +737,8 @@ class ApexCalculator:
             }
 
         from collections import defaultdict
+        import logging
+        logger = logging.getLogger(__name__)
 
         now = datetime.now()
         today_start = datetime(now.year, now.month, now.day)
@@ -409,6 +756,10 @@ class ApexCalculator:
         # 按时间排序
         sorted_fills = sorted(fills, key=lambda x: x.get('time', 0))
 
+        # 收集前10个交易记录的方向信息用于调试
+        direction_samples = set()
+        sample_count = 0
+
         for fill in sorted_fills:
             coin = fill.get('coin', '')
             direction = fill.get('dir', '').strip()
@@ -418,11 +769,39 @@ class ApexCalculator:
             if not coin or not timestamp or size == 0:
                 continue
 
+            # 收集样本用于调试
+            if sample_count < 10:
+                direction_samples.add(direction)
+                sample_count += 1
+
             # 标准化方向字符串（不区分大小写）
             dir_lower = direction.lower()
 
+            # 处理现货 Buy/Sell（Buy = Open Long, Sell = Close Long）
+            if direction == 'Buy':
+                # Buy 在现货市场表示买入开仓
+                long_open_positions[coin].append([timestamp, size])
+
+            elif direction == 'Sell':
+                # Sell 在现货市场表示卖出平仓
+                remaining_size = size
+
+                while remaining_size > 1e-9 and long_open_positions[coin]:
+                    open_time, open_size = long_open_positions[coin][0]
+
+                    if open_size <= remaining_size:
+                        # 完全平掉这笔开仓
+                        completed_positions.append((open_time, timestamp, open_size))
+                        remaining_size -= open_size
+                        long_open_positions[coin].pop(0)
+                    else:
+                        # 部分平仓
+                        completed_positions.append((open_time, timestamp, remaining_size))
+                        long_open_positions[coin][0][1] -= remaining_size
+                        remaining_size = 0
+
             # 处理开多仓交易
-            if 'open long' in dir_lower and 'short' not in dir_lower:
+            elif 'open long' in dir_lower and 'short' not in dir_lower:
                 long_open_positions[coin].append([timestamp, size])
 
             # 处理开空仓交易
@@ -505,6 +884,14 @@ class ApexCalculator:
 
             if close_dt >= month_ago:
                 month_hold_times.append(hold_time_days)
+
+        # 调试输出
+        if not completed_positions:
+            logger.warning(f"⚠️ 持仓时间计算：未能配对任何交易记录")
+            logger.warning(f"   总交易记录: {len(fills)} 条")
+            logger.warning(f"   方向样本: {direction_samples}")
+            logger.warning(f"   未平仓多头: {sum(len(q) for q in long_open_positions.values())} 笔")
+            logger.warning(f"   未平仓空头: {sum(len(q) for q in short_open_positions.values())} 笔")
 
         return {
             "todayCount": sum(today_hold_times) / len(today_hold_times) if today_hold_times else 0,
@@ -616,18 +1003,9 @@ class ApexCalculator:
                     "trades_per_year": 0
                 }
 
-            # 指标9: 基于单笔交易收益率的 Max Drawdown（不依赖本金）
-            if fills and len(fills) > 1:
-                max_dd_on_trades = self.calculate_max_drawdown_on_trades(fills)
-                results["max_drawdown_on_trades"] = max_dd_on_trades
-            else:
-                results["max_drawdown_on_trades"] = {
-                    "max_drawdown_pct": 0,
-                    "peak_return": 0,
-                    "trough_return": 0,
-                    "total_trades": 0,
-                    "cumulative_return": 0
-                }
+            # 指标9: Max Drawdown（已移除）
+            # ⚠️ Max Drawdown 算法已移除，因为基于PNL的回撤计算不够准确
+            # 原因：无法反映真实的风险暴露和资金回撤比例
 
             # 指标10: 基于单笔交易收益率的收益率指标（不依赖本金）
             if fills and len(fills) > 1:
@@ -641,6 +1019,32 @@ class ApexCalculator:
                     "annualized_return_valid": False,
                     "annualized_return_warnings": ["NO_TRADES"]
                 }
+
+            # 指标11: 多周期ROE（24小时、7天、30天、历史总计）
+            multi_roe = self.calculate_multi_period_roe(user_address, force_refresh)
+
+            # 格式化ROE数据的辅助函数
+            def format_roe_metrics(roe: ROEMetrics) -> Dict[str, Any]:
+                return {
+                    "period": roe.period,
+                    "period_label": roe.period_label,
+                    "roe_percent": roe.roe_percent,
+                    "start_equity": roe.start_equity,
+                    "current_equity": roe.current_equity,
+                    "pnl": roe.pnl,
+                    "is_valid": roe.is_valid,
+                    "error_message": roe.error_message,
+                    "period_hours": roe.period_hours,
+                    "expected_hours": roe.expected_hours,
+                    "is_sufficient_history": roe.is_sufficient_history,
+                    "start_time": roe.start_time.isoformat(),
+                    "end_time": roe.end_time.isoformat()
+                }
+
+            results["roe_24h"] = format_roe_metrics(multi_roe.roe_24h)
+            results["roe_7d"] = format_roe_metrics(multi_roe.roe_7d)
+            results["roe_30d"] = format_roe_metrics(multi_roe.roe_30d)
+            results["roe_all"] = format_roe_metrics(multi_roe.roe_all)
 
             return results
 
@@ -799,117 +1203,40 @@ class ApexCalculator:
             "trades_per_year": trades_per_year
         }
 
-    def calculate_max_drawdown_on_trades(self, fills: List[Dict]) -> Dict[str, float]:
-        """
-        基于单笔交易收益率计算最大回撤（不依赖本金）
-
-        使用复利计算累计收益率曲线，追踪峰谷
-
-        参数：
-            fills: 成交记录列表
-
-        返回：
-            - max_drawdown_pct: 最大回撤百分比
-            - peak_return: 峰值累计收益率
-            - trough_return: 谷底累计收益率
-            - peak_date: 峰值日期
-            - trough_date: 谷底日期
-            - total_trades: 交易数量
-            - cumulative_return: 总累计收益率
-        """
-        trade_returns = []
-        trade_times = []
-
-        for fill in fills:
-            closed_pnl = float(fill.get('closedPnl', 0))
-            if closed_pnl == 0:
-                continue
-
-            sz = float(fill.get('sz', 0))
-            px = float(fill.get('px', 0))
-            notional_value = abs(sz) * px
-
-            if notional_value > 0:
-                trade_return = closed_pnl / notional_value
-                trade_returns.append(trade_return)
-                trade_times.append(fill.get('time', 0))
-
-        if len(trade_returns) < 2:
-            return {
-                "max_drawdown_pct": 0,
-                "peak_return": 0,
-                "trough_return": 0,
-                "peak_date": "N/A",
-                "trough_date": "N/A",
-                "total_trades": 0,
-                "cumulative_return": 0
-            }
-
-        # 构建累计收益率序列（复利）
-        cumulative_returns = []
-        cumulative = 1.0
-
-        for ret in trade_returns:
-            cumulative *= (1 + ret)
-            cumulative_returns.append(cumulative)
-
-        # 计算最大回撤
-        peak = cumulative_returns[0]
-        peak_index = 0
-        max_drawdown = 0
-        trough_value = peak
-        trough_index = 0
-
-        for i, value in enumerate(cumulative_returns):
-            if value > peak:
-                peak = value
-                peak_index = i
-
-            drawdown = (peak - value) / peak
-
-            if drawdown > max_drawdown:
-                max_drawdown = drawdown
-                trough_value = value
-                trough_index = i
-
-        # 格式化日期
-        def format_date(timestamp_ms):
-            if timestamp_ms > 0:
-                try:
-                    dt = datetime.fromtimestamp(timestamp_ms / 1000)
-                    return dt.strftime('%Y-%m-%d')
-                except:
-                    return "N/A"
-            return "N/A"
-
-        peak_date = format_date(trade_times[peak_index])
-        trough_date = format_date(trade_times[trough_index])
-
-        return {
-            "max_drawdown_pct": max_drawdown * 100,
-            "peak_return": (peak - 1) * 100,
-            "trough_return": (trough_value - 1) * 100,
-            "peak_date": peak_date,
-            "trough_date": trough_date,
-            "total_trades": len(trade_returns),
-            "cumulative_return": (cumulative - 1) * 100
-        }
+    # ============================================================================
+    # Max Drawdown 算法已移除
+    # ============================================================================
+    # 原因：基于累计PNL的回撤计算无法准确反映真实的风险暴露
+    #
+    # 问题：
+    # 1. 无法反映资金使用效率（回撤金额 vs 实际投入本金）
+    # 2. 不考虑杠杆和保证金的影响
+    # 3. 与 Sharpe Ratio 等风险指标存在概念重复
+    #
+    # 替代指标：
+    # - Sharpe Ratio: 已经包含了风险调整
+    # - Win Rate: 反映策略稳定性
+    # - Profit Factor: 反映盈亏比
+    # ============================================================================
 
     def calculate_return_metrics_on_trades(self, fills: List[Dict]) -> Dict[str, float]:
         """
-        基于单笔交易收益率计算累计和年化收益率（不依赖本金）
+        基于单笔交易收益率计算统计指标（不依赖本金）
+
+        ⚠️ 注意：不再计算复利累计收益率和年化收益率
+        原因：复利计算假设每笔交易使用全部资金，但实际持仓价值差异巨大，
+             导致计算结果与实际情况不符。
 
         参数：
             fills: 成交记录列表
 
         返回：
-            - cumulative_return: 累计收益率（复利）
-            - annualized_return: 年化收益率
+            - mean_return: 平均每笔收益率
+            - total_trades: 总交易数
             - trading_days: 交易天数
-            - annualized_return_valid: 年化收益率是否可靠
-            - annualized_return_warnings: 警告列表
         """
         trade_returns = []
+        trade_pnls = []
         trade_times = []
 
         for fill in fills:
@@ -924,22 +1251,20 @@ class ApexCalculator:
             if notional_value > 0:
                 trade_return = closed_pnl / notional_value
                 trade_returns.append(trade_return)
+                trade_pnls.append(closed_pnl)
                 trade_times.append(fill.get('time', 0))
 
         if len(trade_returns) < 1:
             return {
-                "cumulative_return": 0,
-                "annualized_return": 0,
+                "mean_return": 0,
+                "total_trades": 0,
                 "trading_days": 0,
-                "annualized_return_valid": False,
-                "annualized_return_warnings": ["NO_TRADES"]
+                "total_pnl": 0
             }
 
-        # 计算累计收益率（复利）
-        cumulative = 1.0
-        for ret in trade_returns:
-            cumulative *= (1 + ret)
-        cumulative_return = (cumulative - 1) * 100
+        # 简单统计
+        mean_return = sum(trade_returns) / len(trade_returns)
+        total_pnl = sum(trade_pnls)
 
         # 计算交易天数
         if len(trade_times) >= 2:
@@ -949,57 +1274,11 @@ class ApexCalculator:
         else:
             trading_days = 0
 
-        # 计算年化收益率（带溢出保护）
-        annualized_return = 0
-        annualized_return_valid = True
-        annualized_return_warnings = []
-
-        if trading_days > 0:
-            try:
-                annual_factor = 365.0 / trading_days
-
-                # 分级警告而非硬性拒绝
-                if trading_days < 1:
-                    annualized_return_valid = False
-                    annualized_return_warnings.append("LESS_THAN_1_DAY")
-                elif trading_days < 7:
-                    annualized_return_valid = False
-                    annualized_return_warnings.append("LESS_THAN_7_DAYS")
-                elif trading_days < 30:
-                    annualized_return_valid = False
-                    annualized_return_warnings.append("LESS_THAN_30_DAYS")
-
-                # 计算年化收益率
-                if annual_factor <= 100:  # 交易天数 >= 3.65 天
-                    annualized_return = (math.pow(cumulative, annual_factor) - 1) * 100
-
-                    # 检查极端值
-                    if abs(annualized_return) > 5000:
-                        annualized_return_valid = False
-                        annualized_return_warnings.append("EXTREME_RETURN_VALUE")
-                    elif abs(annualized_return) > 1000:
-                        annualized_return_valid = False
-                        annualized_return_warnings.append("VERY_HIGH_RETURN_VALUE")
-                else:
-                    # 交易天数太短，标记但仍计算
-                    annualized_return = (math.pow(cumulative, annual_factor) - 1) * 100
-                    annualized_return_valid = False
-                    annualized_return_warnings.append("VERY_SHORT_PERIOD")
-
-            except (OverflowError, ValueError):
-                annualized_return = 0
-                annualized_return_valid = False
-                annualized_return_warnings.append("CALCULATION_ERROR")
-        else:
-            annualized_return_valid = False
-            annualized_return_warnings.append("NO_TIME_SPAN")
-
         return {
-            "cumulative_return": cumulative_return,
-            "annualized_return": annualized_return,
+            "mean_return": mean_return,
+            "total_trades": len(trade_returns),
             "trading_days": trading_days,
-            "annualized_return_valid": annualized_return_valid,
-            "annualized_return_warnings": annualized_return_warnings
+            "total_pnl": total_pnl
         }
 
 

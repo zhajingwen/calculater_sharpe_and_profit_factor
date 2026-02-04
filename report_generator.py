@@ -21,6 +21,27 @@ def format_profit_factor(pf: float) -> str:
     return f"{pf:.4f}"
 
 
+def format_hold_time(days: float) -> str:
+    """智能格式化持仓时间
+
+    Args:
+        days: 天数
+
+    Returns:
+        格式化的字符串（自动选择天/小时/分钟）
+    """
+    if days == 0:
+        return "0 天"
+    elif days >= 1:
+        return f"{days:.2f} 天"
+    elif days >= 1/24:  # >= 1 小时
+        hours = days * 24
+        return f"{hours:.2f} 小时"
+    else:  # < 1 小时
+        minutes = days * 24 * 60
+        return f"{minutes:.2f} 分钟"
+
+
 def generate_markdown_report(results: Dict, user_address: str, filename: str = "trading_report.md") -> str:
     """
     生成 Markdown 格式的交易分析报告
@@ -49,13 +70,6 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
     # 使用基于交易收益率的指标
     sharpe_on_trades = results.get('sharpe_on_trades', {})
-    trade_dd = results.get('max_drawdown_on_trades', {
-        "max_drawdown_pct": 0,
-        "peak_return": 0,
-        "trough_return": 0,
-        "total_trades": 0,
-        "cumulative_return": 0
-    })
     return_metrics_on_trades = results.get('return_metrics_on_trades', {})
 
     # 获取并格式化 profit_factor
@@ -71,7 +85,112 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
 ---
 
-## 📈 核心指标（基于单笔交易收益率）
+"""
+
+    # 添加多周期ROE部分
+    def get_roe_rating(roe_percent: float) -> str:
+        """获取ROE评级"""
+        if roe_percent >= 10:
+            return "🔥 极佳"
+        elif roe_percent >= 5:
+            return "✅ 优秀"
+        elif roe_percent >= 0:
+            return "📈 盈利"
+        elif roe_percent >= -5:
+            return "⚠️ 小幅亏损"
+        else:
+            return "📉 较大亏损"
+
+    # 获取所有周期的ROE数据
+    roe_24h = results.get('roe_24h', {})
+    roe_7d = results.get('roe_7d', {})
+    roe_30d = results.get('roe_30d', {})
+    roe_all = results.get('roe_all', {})
+
+    # 检查是否有任何有效的ROE数据
+    has_valid_roe = any([
+        roe_24h.get('is_valid', False),
+        roe_7d.get('is_valid', False),
+        roe_30d.get('is_valid', False),
+        roe_all.get('is_valid', False)
+    ])
+
+    if has_valid_roe:
+        md_content += """## 📊 多周期ROE指标
+
+| 时间周期 | ROE | 起始权益 | 当前权益 | PNL | 评级 |
+|---------|-----|----------|----------|-----|------|
+"""
+
+        # 添加各个周期的数据
+        for roe_data, label in [(roe_24h, '24小时'), (roe_7d, '7天'), (roe_30d, '30天'), (roe_all, '历史总计')]:
+            if roe_data.get('is_valid', False):
+                roe_percent = roe_data.get('roe_percent', 0)
+                start_equity = roe_data.get('start_equity', 0)
+                current_equity = roe_data.get('current_equity', 0)
+                pnl = roe_data.get('pnl', 0)
+                rating = get_roe_rating(roe_percent)
+
+                md_content += f"| **{label}** | **{roe_percent:+.2f}%** | ${start_equity:,.2f} | ${current_equity:,.2f} | {'+' if pnl >= 0 else ''}${pnl:,.2f} | {rating} |\n"
+            else:
+                error_msg = roe_data.get('error_message', '计算失败')
+                md_content += f"| **{label}** | ❌ | - | - | - | {error_msg[:20]} |\n"
+
+        md_content += "\n"
+
+        # 添加警告信息（如果有）
+        warnings = []
+        for roe_data, label in [(roe_24h, '24小时'), (roe_7d, '7天'), (roe_30d, '30天')]:
+            if roe_data.get('is_valid', False) and not roe_data.get('is_sufficient_history', True):
+                period_hours = roe_data.get('period_hours', 0)
+                warnings.append(f"- {label}: 实际历史仅 {period_hours:.1f} 小时")
+
+        if warnings:
+            md_content += "> ⚠️ **注意**: 部分周期历史数据不足，ROE基于实际时长计算\n\n"
+            for warning in warnings:
+                md_content += f"> {warning}\n"
+            md_content += "\n"
+
+        # 获取更新时间（使用24h的时间）
+        try:
+            end_time = roe_24h.get('end_time', 'N/A')
+            end_dt = datetime.fromisoformat(end_time)
+            end_time_str = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+        except:
+            end_time_str = 'N/A'
+
+        md_content += f"""
+**更新时间**: {end_time_str}
+
+**计算公式**:
+```
+ROE (%) = (周期累计PNL / 起始权益) × 100
+```
+
+**指标说明**:
+- **24小时ROE**: 最近一天的资金使用效率
+- **7天ROE**: 最近一周的整体表现
+- **30天ROE**: 最近一个月的长期表现
+- **历史总ROE**: 账户开户以来的总体收益率
+
+**优势**:
+- ✅ ROE反映资金使用效率，考虑账户规模
+- ✅ 多周期对比帮助识别表现趋势
+- ✅ 适合评估不同时间尺度的交易策略
+
+---
+
+"""
+    else:
+        md_content += """## 📊 多周期ROE指标
+
+> ❌ **ROE计算失败**: 无法获取ROE数据
+
+---
+
+"""
+
+    md_content += """## 📈 核心指标（基于单笔交易收益率）
 
 > ✅ 这些指标不依赖本金数据，准确反映交易策略表现
 
@@ -93,24 +212,9 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 **优势**:
 - ✅ 完全独立：每笔交易自给自足
 - ✅ 符合金融标准：基于收益率而非绝对金额
-- ✅ 准确可靠：使用复利计算累计收益率
 - ✅ 不受出入金影响：与账本记录无关
 
 **评级**: {'✅ 优秀的风险调整收益' if sharpe_on_trades.get('annualized_sharpe', 0) > 1 else '⚠️ 正收益但风险较高' if sharpe_on_trades.get('annualized_sharpe', 0) > 0 else '❌ 负的风险调整收益'}
-
-### Max Drawdown（最大回撤）
-
-| 指标 | 数值 | 说明 |
-|------|------|------|
-| 最大回撤 | **{trade_dd['max_drawdown_pct']:.2f}%** | {'🔴 高风险' if trade_dd['max_drawdown_pct'] > 50 else '🟡 中等风险' if trade_dd['max_drawdown_pct'] > 20 else '🟢 低风险'} |
-| 峰值累计收益 | {trade_dd['peak_return']:.2f}% | 历史最高点 |
-| 峰值日期 | **{trade_dd.get('peak_date', 'N/A')}** | 峰值发生时间 |
-| 谷底累计收益 | {trade_dd['trough_return']:.2f}% | 回撤最低点 |
-| 谷底日期 | **{trade_dd.get('trough_date', 'N/A')}** | 谷底发生时间 |
-
-**风险等级**: {'🔴 高风险' if trade_dd['max_drawdown_pct'] > 50 else '🟡 中等风险' if trade_dd['max_drawdown_pct'] > 20 else '🟢 低风险'}
-
-> 📅 **回撤时间跨度**: 从 {trade_dd.get('peak_date', 'N/A')} 到 {trade_dd.get('trough_date', 'N/A')}
 
 ### 交易统计
 
@@ -120,14 +224,13 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 | Win Rate | {win_rate_data.get('winRate', 0):.2f}% |
 | Direction Bias | {win_rate_data.get('bias', 0):.2f}% |
 | Total Trades | {win_rate_data.get('totalTrades', 0)} |
-| Avg Hold Time | {hold_time_stats.get('allTimeAverage', 0):.2f} 天 |
+| Avg Hold Time | {format_hold_time(hold_time_stats.get('allTimeAverage', 0))} |
 
 ### 收益率指标
 
 | 指标 | 数值 |
 |------|------|
-| 累计收益率 | **{return_metrics_on_trades.get('cumulative_return', 0):.2f}%** |
-| 年化收益率 | {return_metrics_on_trades.get('annualized_return', 0):.2f}% |
+| 平均每笔收益率 | **{sharpe_on_trades.get('mean_return', 0):.2%}** |
 | 交易天数 | {return_metrics_on_trades.get('trading_days', 0):.1f} 天 |
 
 ---
@@ -145,7 +248,6 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
 ✅ **完全独立**: 每笔交易自给自足
 ✅ **符合金融标准**: 基于收益率而非绝对金额
-✅ **准确可靠**: 使用复利计算累计收益率
 ✅ **不受出入金影响**: 与账本记录无关
 
 ### 计算公式
@@ -156,15 +258,24 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 其中：|sz| × px = 该笔交易的持仓价值（名义价值）
 ```
 
-**累计收益率**（复利）:
+**平均每笔收益率**:
 ```
-累计收益率 = ∏(1 + 单笔收益率) - 1
+平均每笔收益率 = Σ(单笔收益率) / 交易笔数
 ```
 
-**年化收益率**:
-```
-年化收益率 = (1 + 累计收益率)^(365/交易天数) - 1
-```
+### 关于累计收益率
+
+⚠️ **为什么不显示累计收益率？**
+
+基于持仓价值的复利累计收益率**不适用于当前数据**：
+- 复利假设每次交易使用全部资金
+- 但实际持仓价值差异巨大（最小几十美元，最大数万美元）
+- 导致计算结果与实际情况不符
+
+我们提供更有意义的指标：
+- **平均每笔收益率**: 反映平均表现
+- **Sharpe Ratio**: 反映风险调整收益
+- **总盈亏**: 反映绝对收益
 
 ---
 
@@ -188,10 +299,10 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
 | 时间段 | 平均持仓时间 |
 |--------|--------------|
-| 今日 | {hold_time_stats.get('todayCount', 0):.2f} 天 |
-| 近7天 | {hold_time_stats.get('last7DaysAverage', 0):.2f} 天 |
-| 近30天 | {hold_time_stats.get('last30DaysAverage', 0):.2f} 天 |
-| 历史平均 | {hold_time_stats.get('allTimeAverage', 0):.2f} 天 |
+| 今日 | {format_hold_time(hold_time_stats.get('todayCount', 0))} |
+| 近7天 | {format_hold_time(hold_time_stats.get('last7DaysAverage', 0))} |
+| 近30天 | {format_hold_time(hold_time_stats.get('last30DaysAverage', 0))} |
+| 历史平均 | {format_hold_time(hold_time_stats.get('allTimeAverage', 0))} |
 
 ---
 
@@ -223,10 +334,12 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
     # 添加风险
     risks = []
-    if trade_dd['max_drawdown_pct'] > 50:
-        risks.append(f"- **极高回撤风险** (最大回撤 = {trade_dd['max_drawdown_pct']:.2f}%)")
     if win_rate_data.get('winRate', 0) < 50:
         risks.append(f"- **胜率偏低** (Win Rate = {win_rate_data.get('winRate', 0):.2f}%)")
+
+    sharpe_ratio = sharpe_on_trades.get('annualized_sharpe', 0)
+    if sharpe_ratio < 1:
+        risks.append(f"- **风险调整收益偏低** (Sharpe Ratio = {sharpe_ratio:.2f} < 1.0)")
 
     if risks:
         md_content += "\n".join(risks)
@@ -237,13 +350,10 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 
     # 添加建议
     suggestions = []
-    if trade_dd['max_drawdown_pct'] > 50:
-        suggestions.extend([
-            "- 考虑降低仓位大小",
-            "- 添加更严格的止损机制"
-        ])
     if win_rate_data.get('winRate', 0) < 45:
         suggestions.append("- 优化入场时机，提高胜率")
+    if sharpe_ratio < 1:
+        suggestions.append("- 优化风险管理，降低收益波动")
     suggestions.append("- 持续优化资金管理策略")
 
     md_content += "\n".join(suggestions)
@@ -270,16 +380,18 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 ```
 单笔收益率 = closedPnL / (|sz| × px)
 Sharpe Ratio = (平均收益率 - 无风险利率) / 收益率标准差
-Max Drawdown = 基于累计收益率序列计算
-累计收益率 = ∏(1 + 单笔收益率) - 1
+平均每笔收益率 = Σ(单笔收益率) / 交易笔数
 ```
 
 **优势**:
 - ✅ 完全独立：每笔交易自给自足，不需要外部本金数据
 - ✅ 符合金融标准：基于收益率而非绝对金额
-- ✅ 准确可靠：使用复利计算累计收益率
 - ✅ 不受出入金影响：与账本记录无关
 - ✅ 可跨账户、跨时期对比
+
+**关于累计收益率**:
+- ⚠️ 不显示复利累计收益率，因为复利假设不适用于持仓价值差异巨大的交易
+- ✅ 提供平均每笔收益率和Sharpe Ratio等更有意义的指标
 
 ### 数据来源
 
@@ -320,13 +432,6 @@ def generate_summary_text(results: Dict) -> str:
 
     # 使用基于交易收益率的指标
     sharpe_on_trades = results.get('sharpe_on_trades', {})
-    trade_dd = results.get('max_drawdown_on_trades', {
-        "max_drawdown_pct": 0,
-        "peak_return": 0,
-        "trough_return": 0,
-        "total_trades": 0,
-        "cumulative_return": 0
-    })
 
     # 获取并格式化 profit_factor
     profit_factor = results.get('profit_factor', 0.0)
@@ -344,15 +449,13 @@ def generate_summary_text(results: Dict) -> str:
 📊 交易分析摘要
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✅ 核心指标（基于交易收益率）
+✅ 核心指标
   • Sharpe Ratio: {sharpe_on_trades.get('annualized_sharpe', 0):.2f}
-  • Max Drawdown: {trade_dd['max_drawdown_pct']:.2f}%
   • Profit Factor: {pf_display}
   • Win Rate: {results.get('win_rate', {}).get('winRate', 0):.2f}%
 
 🎯 评级
   • 风险调整收益: {'✅ 优秀' if sharpe_on_trades.get('annualized_sharpe', 0) > 1 else '⚠️ 偏低'}
-  • 风险等级: {'🔴 高风险' if trade_dd['max_drawdown_pct'] > 50 else '🟡 中等' if trade_dd['max_drawdown_pct'] > 20 else '🟢 低风险'}
   • 盈利能力: {profit_status}
 """
 

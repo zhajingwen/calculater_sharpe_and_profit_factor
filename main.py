@@ -39,7 +39,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AnalysisResults:
     """分析结果数据类"""
-    trade_dd: Dict[str, float]
     win_rate_data: Dict[str, Any]
     hold_time_stats: Dict[str, float]
     data_summary: Dict[str, Any]
@@ -117,17 +116,7 @@ def extract_analysis_data(calculator: ApexCalculator, results: Dict[str, Any],
             user_data = calculator.get_user_data(user_address, force_refresh=False)
             fills = user_data.get('fills', [])
 
-        # 使用基于交易收益率的最大回撤（从 results 中获取）
-        trade_dd = results.get('max_drawdown_on_trades', {
-            "max_drawdown_pct": 0,
-            "peak_return": 0,
-            "trough_return": 0,
-            "total_trades": 0,
-            "cumulative_return": 0
-        })
-
         return AnalysisResults(
-            trade_dd=trade_dd,
             win_rate_data=win_rate_data,
             hold_time_stats=hold_time_stats,
             data_summary=data_summary,
@@ -190,45 +179,8 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
         print("\n  ℹ️  计算方法: 单笔收益率 = closedPnL / (|sz| × px)")
         print("  ℹ️  持仓价值 = |sz| × px（该笔交易的名义价值）")
 
-    # Max Drawdown - 基于交易收益率
-    trade_dd = analysis.raw_results.get('max_drawdown_on_trades', {})
-    print("\n  ┌─ Max Drawdown（基于累计收益率曲线）")
-    print("  │")
-
-    widths = [28, 18, 28]
-    print_table_separator(widths, 'top')
-    print_table_row(['指标', '数值', '风险等级/说明'], widths)
-    print_table_separator(widths, 'mid')
-
-    dd_pct = trade_dd.get('max_drawdown_pct', 0)
-    if dd_pct < 20:
-        risk_level = "🟢 低风险"
-    elif dd_pct < 50:
-        risk_level = "🟡 中等风险"
-    else:
-        risk_level = "🔴 高风险"
-
-    print_table_row(
-        ['最大回撤', f"{dd_pct:.2f}%", risk_level],
-        widths, ['left', 'right', 'left']
-    )
-    print_table_row(
-        ['峰值累计收益', f"{trade_dd.get('peak_return', 0):.2f}%", f"历史最高点"],
-        widths, ['left', 'right', 'left']
-    )
-    print_table_row(
-        ['峰值日期', trade_dd.get('peak_date', 'N/A'), '峰值发生时间'],
-        widths, ['left', 'right', 'left']
-    )
-    print_table_row(
-        ['谷底累计收益', f"{trade_dd.get('trough_return', 0):.2f}%", '回撤最低点'],
-        widths, ['left', 'right', 'left']
-    )
-    print_table_row(
-        ['谷底日期', trade_dd.get('trough_date', 'N/A'), '谷底发生时间'],
-        widths, ['left', 'right', 'left']
-    )
-    print_table_separator(widths, 'bottom')
+    # Max Drawdown 已移除
+    # 原因：基于PNL的回撤计算不够准确，无法反映真实的资金风险
 
     # 交易统计
     print("\n  ┌─ 交易统计")
@@ -263,8 +215,20 @@ def display_core_metrics(analysis: AnalysisResults) -> None:
         ['Total Trades', f"{analysis.win_rate_data.get('totalTrades', 0)}", '总交易次数'],
         widths, ['left', 'right', 'left']
     )
+
+    # 格式化持仓时间
+    avg_hold_days = analysis.hold_time_stats.get('allTimeAverage', 0)
+    if avg_hold_days == 0:
+        avg_hold_str = "0 天"
+    elif avg_hold_days >= 1:
+        avg_hold_str = f"{avg_hold_days:.2f} 天"
+    elif avg_hold_days >= 1/24:  # >= 1 小时
+        avg_hold_str = f"{avg_hold_days * 24:.2f} 小时"
+    else:  # < 1 小时
+        avg_hold_str = f"{avg_hold_days * 24 * 60:.2f} 分钟"
+
     print_table_row(
-        ['Avg Hold Time', f"{analysis.hold_time_stats.get('allTimeAverage', 0):.2f} 天", '平均持仓时长'],
+        ['Avg Hold Time', avg_hold_str, '平均持仓时长'],
         widths, ['left', 'right', 'left']
     )
     print_table_separator(widths, 'bottom')
@@ -303,11 +267,106 @@ def display_account_info(analysis: AnalysisResults) -> None:
     print(f"  │  ├─ 已实现盈亏      ${total_realized_pnl:>12,.2f}")
     print(f"  │  └─ 未实现盈亏      ${total_unrealized_pnl:>12,.2f}")
 
+    # 多周期ROE指标
+    def get_roe_rating(roe_percent: float) -> str:
+        """获取ROE评级"""
+        if roe_percent >= 10:
+            return "🔥 极佳"
+        elif roe_percent >= 5:
+            return "✅ 优秀"
+        elif roe_percent >= 0:
+            return "📈 盈利"
+        elif roe_percent >= -5:
+            return "⚠️ 小幅亏损"
+        else:
+            return "📉 较大亏损"
+
+    # 获取所有周期的ROE数据
+    roe_24h = raw_results.get('roe_24h', {})
+    roe_7d = raw_results.get('roe_7d', {})
+    roe_30d = raw_results.get('roe_30d', {})
+    roe_all = raw_results.get('roe_all', {})
+
+    # 检查是否有任何有效的ROE数据
+    has_valid_roe = any([
+        roe_24h.get('is_valid', False),
+        roe_7d.get('is_valid', False),
+        roe_30d.get('is_valid', False),
+        roe_all.get('is_valid', False)
+    ])
+
+    if has_valid_roe:
+        # 使用24h的ROE确定总体图标
+        roe_24h_percent = roe_24h.get('roe_percent', 0)
+        roe_icon = "📈" if roe_24h_percent >= 0 else "📉"
+
+        print(f"\n  ┌─ 多周期ROE {roe_icon}")
+        print("  │")
+
+        widths = [20, 14, 14, 18, 18]
+        print_table_separator(widths, 'top')
+        print_table_row(['时间周期', 'ROE', '起始权益', '当前权益', '评级'], widths)
+        print_table_separator(widths, 'mid')
+
+        # 显示各个周期的ROE
+        for roe_data, label in [
+            (roe_24h, '24小时'),
+            (roe_7d, '7天'),
+            (roe_30d, '30天'),
+            (roe_all, '历史总计')
+        ]:
+            if roe_data.get('is_valid', False):
+                roe_percent = roe_data.get('roe_percent', 0)
+                start_equity = roe_data.get('start_equity', 0)
+                current_equity = roe_data.get('current_equity', 0)
+                rating = get_roe_rating(roe_percent)
+
+                roe_sign = '+' if roe_percent >= 0 else ''
+                print_table_row(
+                    [label, f'{roe_sign}{roe_percent:.2f}%', f'${start_equity:,.0f}', f'${current_equity:,.0f}', rating],
+                    widths, ['left', 'right', 'right', 'right', 'left']
+                )
+            else:
+                error_msg = roe_data.get('error_message', '计算失败')
+                print_table_row(
+                    [label, '❌', '-', '-', error_msg[:12]],
+                    widths, ['left', 'center', 'center', 'center', 'left']
+                )
+
+        print_table_separator(widths, 'bottom')
+
+        # 显示警告信息（如果有）
+        warnings = []
+        for roe_data, label in [(roe_24h, '24小时'), (roe_7d, '7天'), (roe_30d, '30天')]:
+            if roe_data.get('is_valid', False) and not roe_data.get('is_sufficient_history', True):
+                period_hours = roe_data.get('period_hours', 0)
+                warnings.append(f"{label}: 实际历史仅 {period_hours:.1f}h")
+
+        if warnings:
+            print(f"\n  ⚠️  注意: " + ", ".join(warnings))
+            print("  ROE基于实际时长计算")
+
+        # 显示更新时间
+        try:
+            from datetime import datetime
+            end_time = roe_24h.get('end_time', 'N/A')
+            end_dt = datetime.fromisoformat(end_time)
+            end_time_str = end_dt.strftime('%Y-%m-%d %H:%M')
+            print(f"\n  更新时间: {end_time_str}")
+        except:
+            pass
+
+    else:
+        # 显示错误信息
+        print(f"\n  ┌─ 多周期ROE")
+        print("  │")
+        print(f"  ❌ ROE数据不可用")
+
     # 收益率指标（基于交易收益率）
     return_metrics_on_trades = raw_results.get('return_metrics_on_trades', {})
     sharpe_on_trades = raw_results.get('sharpe_on_trades', {})
 
-    print(f"\n  ┌─ 收益率指标（基于单笔交易收益率）")
+    print(f"\n  ┌─ 收益率指标（基于单笔交易）")
     print("  │")
 
     # 平均每笔收益率
@@ -315,36 +374,14 @@ def display_account_info(analysis: AnalysisResults) -> None:
     mean_return_icon = "📈" if mean_return >= 0 else "📉"
     print(f"  │  平均每笔收益率 {mean_return_icon}   {mean_return:>12.2%}")
 
-    cumulative_return = return_metrics_on_trades.get('cumulative_return', 0)
-    return_icon = "📈" if cumulative_return >= 0 else "📉"
-    print(f"  │  累计收益率 {return_icon}       {cumulative_return:>12.2f}%")
-
-    # 年化收益率显示（根据警告显示）
-    annualized_return = return_metrics_on_trades.get('annualized_return', 0)
-    trading_days = return_metrics_on_trades.get('trading_days', 0)
-    warnings = return_metrics_on_trades.get('annualized_return_warnings', [])
-
-    if "LESS_THAN_1_DAY" in warnings:
-        print(f"  │  年化收益率 🔴       {annualized_return:>12.2f}%  (🔴 少于1天，极不可靠)")
-    elif "LESS_THAN_7_DAYS" in warnings:
-        print(f"  │  年化收益率 🔴       {annualized_return:>12.2f}%  (🔴 少于7天，不适合年化)")
-    elif "LESS_THAN_30_DAYS" in warnings:
-        print(f"  │  年化收益率 🟡       {annualized_return:>12.2f}%  (🟡 少于30天，仅供参考)")
-    elif "EXTREME_RETURN_VALUE" in warnings:
-        print(f"  │  年化收益率 🟡       {annualized_return:>12.2f}%  (🟡 极高值，需核实)")
-    elif "VERY_HIGH_RETURN_VALUE" in warnings:
-        print(f"  │  年化收益率 🟡       {annualized_return:>12.2f}%  (🟡 较高值，需验证)")
-    else:
-        print(f"  │  年化收益率 ✅       {annualized_return:>12.2f}%")
-
     print("  │")
-    print(f"  │  交易天数            {trading_days:>12.1f}  天")
+    print(f"  │  交易天数            {return_metrics_on_trades.get('trading_days', 0):>12.1f}  天")
     print(f"  │  交易笔数            {analysis.win_rate_data.get('totalTrades', 0):>12}  笔")
 
     print("\n  ℹ️  说明:")
     print("  • 收益率基于单笔交易的持仓价值计算，不依赖外部本金")
-    print("  • 累计收益率使用复利计算：∏(1 + 单笔收益率) - 1")
-    print("  • 年化收益率在交易天数 >= 30 天时较为可靠")
+    print("  • 平均每笔收益率：所有交易收益率的简单平均")
+    print("  • 不显示累计收益率：复利假设不适用于持仓价值差异巨大的交易")
 
 def display_hold_time_stats(analysis: AnalysisResults) -> None:
     """显示持仓时间统计"""
@@ -352,28 +389,48 @@ def display_hold_time_stats(analysis: AnalysisResults) -> None:
 
     stats = analysis.hold_time_stats
 
+    def format_hold_time(days: float) -> str:
+        """智能格式化持仓时间
+
+        Args:
+            days: 天数
+
+        Returns:
+            格式化的字符串（自动选择天/小时/分钟）
+        """
+        if days == 0:
+            return "0 天"
+        elif days >= 1:
+            return f"{days:.2f} 天"
+        elif days >= 1/24:  # >= 1 小时
+            hours = days * 24
+            return f"{hours:.2f} 小时"
+        else:  # < 1 小时
+            minutes = days * 24 * 60
+            return f"{minutes:.2f} 分钟"
+
     print("\n  ┌─ 平均持仓时长")
     print("  │")
 
-    widths = [28, 18, 28]
+    widths = [28, 20, 28]
     print_table_separator(widths, 'top')
     print_table_row(['时间段', '平均持仓', '说明'], widths)
     print_table_separator(widths, 'mid')
 
     print_table_row(
-        ['今日', f"{stats.get('todayCount', 0):.2f} 天", '当日交易'],
+        ['今日', format_hold_time(stats.get('todayCount', 0)), '当日交易'],
         widths, ['left', 'right', 'left']
     )
     print_table_row(
-        ['近 7 天', f"{stats.get('last7DaysAverage', 0):.2f} 天", '最近一周'],
+        ['近 7 天', format_hold_time(stats.get('last7DaysAverage', 0)), '最近一周'],
         widths, ['left', 'right', 'left']
     )
     print_table_row(
-        ['近 30 天', f"{stats.get('last30DaysAverage', 0):.2f} 天", '最近一月'],
+        ['近 30 天', format_hold_time(stats.get('last30DaysAverage', 0)), '最近一月'],
         widths, ['left', 'right', 'left']
     )
     print_table_row(
-        ['历史平均', f"{stats.get('allTimeAverage', 0):.2f} 天", '全部交易历史'],
+        ['历史平均', format_hold_time(stats.get('allTimeAverage', 0)), '全部交易历史'],
         widths, ['left', 'right', 'left']
     )
     print_table_separator(widths, 'bottom')
@@ -420,13 +477,13 @@ def display_strategy_evaluation(analysis: AnalysisResults) -> None:
     print("\n⚠️  风险:")
     risks = []
 
-    trade_dd = analysis.raw_results.get('max_drawdown_on_trades', {})
-    if trade_dd.get('max_drawdown_pct', 0) > 50:
-        pct = trade_dd['max_drawdown_pct']
-        risks.append(f"极高回撤风险（{pct:.2f}%）")
     if analysis.win_rate_data.get('winRate', 0) < 50:
         wr = analysis.win_rate_data.get('winRate', 0)
         risks.append(f"胜率偏低（{wr:.2f}%）")
+
+    sharpe_ratio = analysis.raw_results.get('sharpe_on_trades', {}).get('annualized_sharpe', 0)
+    if sharpe_ratio < 1:
+        risks.append(f"风险调整收益偏低（Sharpe = {sharpe_ratio:.2f} < 1.0）")
 
     if risks:
         for risk in risks:
@@ -438,13 +495,10 @@ def display_strategy_evaluation(analysis: AnalysisResults) -> None:
     print("\n💡 改进建议:")
     suggestions = []
 
-    if trade_dd.get('max_drawdown_pct', 0) > 50:
-        suggestions.extend([
-            "考虑降低仓位大小",
-            "添加更严格的止损机制"
-        ])
     if analysis.win_rate_data.get('winRate', 0) < 45:
-        suggestions.append("优化入场时机")
+        suggestions.append("优化入场时机，提高胜率")
+    if sharpe_ratio < 1:
+        suggestions.append("优化风险管理，降低收益波动")
     suggestions.append("持续优化资金管理策略")
 
     for sug in suggestions:
@@ -623,9 +677,6 @@ def main() -> None:
         force_refresh=args['force_refresh'],
         generate_report=args['report']
     )
-
-    # 显示使用说明
-    display_usage_guide()
 
     # 退出码
     sys.exit(0 if success else 1)
