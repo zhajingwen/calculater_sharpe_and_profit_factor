@@ -284,6 +284,36 @@ class ApexCalculator:
             print(f"✗ 获取保证金摘要失败: {e}")
             return {}
 
+    def _create_invalid_roe(
+        self,
+        period: str,
+        period_label: str,
+        error_message: str,
+        expected_hours: Optional[float] = None,
+        start_equity: float = 0.0,
+        current_equity: float = 0.0,
+        pnl: float = 0.0,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        period_hours: Optional[float] = None
+    ) -> ROEMetrics:
+        """创建无效的ROE指标对象（辅助方法）"""
+        return ROEMetrics(
+            period=period,
+            period_label=period_label,
+            roe_percent=0.0,
+            start_equity=start_equity,
+            current_equity=current_equity,
+            pnl=pnl,
+            start_time=start_time or datetime.now(),
+            end_time=end_time or datetime.now(),
+            is_valid=False,
+            error_message=error_message,
+            period_hours=period_hours,
+            expected_hours=expected_hours,
+            is_sufficient_history=False
+        )
+
     def _calculate_roe_for_period(
         self,
         period_data: Dict[str, Any],
@@ -309,34 +339,10 @@ class ApexCalculator:
 
         # 验证数据完整性
         if not pnl_history:
-            return ROEMetrics(
-                period=period,
-                period_label=period_label,
-                roe_percent=0.0,
-                start_equity=0.0,
-                current_equity=0.0,
-                pnl=0.0,
-                start_time=datetime.now(),
-                end_time=datetime.now(),
-                is_valid=False,
-                error_message="pnlHistory为空",
-                expected_hours=expected_hours
-            )
+            return self._create_invalid_roe(period, period_label, "pnlHistory为空", expected_hours)
 
         if not account_value_history:
-            return ROEMetrics(
-                period=period,
-                period_label=period_label,
-                roe_percent=0.0,
-                start_equity=0.0,
-                current_equity=0.0,
-                pnl=0.0,
-                start_time=datetime.now(),
-                end_time=datetime.now(),
-                is_valid=False,
-                error_message="accountValueHistory为空",
-                expected_hours=expected_hours
-            )
+            return self._create_invalid_roe(period, period_label, "accountValueHistory为空", expected_hours)
 
         # 提取关键数据
         # pnlHistory格式: [[timestamp_ms, cumulative_pnl_str], ...]
@@ -357,8 +363,9 @@ class ApexCalculator:
         time_diff = end_time - start_time
         actual_hours = time_diff.total_seconds() / 3600
 
-        # 对于allTime，如果起始权益为0，需要找到第一个非零的权益作为起始点
-        if period == 'all' and start_equity <= 0:
+        # 如果起始权益为0，查找最接近起始时间的第一个非零权益
+        # 这种情况在账户刚创建或周期开始时账户为空时会发生
+        if start_equity <= 0:
             # 查找第一个非零权益
             for i, item in enumerate(account_value_history):
                 equity = safe_float(item[1], 0.0)
@@ -376,22 +383,13 @@ class ApexCalculator:
                         pnl = safe_float(pnl_history[-1][1], 0.0) - safe_float(pnl_history[i][1], 0.0)
                     break
 
-        # 验证起始权益
+        # 验证起始权益（如果仍然<=0，说明整个周期都没有资金）
         if start_equity <= 0:
-            return ROEMetrics(
-                period=period,
-                period_label=period_label,
-                roe_percent=0.0,
-                start_equity=start_equity,
-                current_equity=current_equity,
-                pnl=pnl,
-                start_time=start_time,
-                end_time=end_time,
-                is_valid=False,
-                error_message=f"起始权益无效: ${start_equity:.2f} (需要>0)",
-                period_hours=actual_hours,
-                expected_hours=expected_hours,
-                is_sufficient_history=False
+            return self._create_invalid_roe(
+                period, period_label,
+                f"起始权益无效: ${start_equity:.2f} (需要>0)",
+                expected_hours, start_equity, current_equity, pnl,
+                start_time, end_time, actual_hours
             )
 
         # 计算ROE
@@ -430,10 +428,6 @@ class ApexCalculator:
         ROE公式：
             24h ROE (%) = (24h累计PNL / 起始权益) × 100
 
-        其中：
-            - 24h累计PNL = pnlHistory[-1] (最新值)
-            - 起始权益 = accountValueHistory[0] (24小时前的值)
-
         Args:
             user_address: 用户钱包地址
             force_refresh: 是否强制刷新缓存
@@ -443,45 +437,9 @@ class ApexCalculator:
 
         注意：此方法保留用于向后兼容，建议使用calculate_multi_period_roe()
         """
-        cache_key = f"portfolio_day_{user_address}"
-
-        # 尝试从缓存获取
-        if not force_refresh:
-            cached_data = self._get_cached_data(cache_key)
-            if cached_data:
-                portfolio_data = cached_data
-            else:
-                portfolio_data = None
-        else:
-            portfolio_data = None
-
-        # 如果缓存未命中，从API获取
-        if portfolio_data is None:
-            try:
-                portfolio_data = self.api_client.get_user_portfolio(user_address)
-                self._set_cache_data(cache_key, portfolio_data)
-            except Exception as e:
-                # API请求失败
-                return ROEMetrics(
-                    period='24h',
-                    period_label='24小时',
-                    roe_percent=0.0,
-                    start_equity=0.0,
-                    current_equity=0.0,
-                    pnl=0.0,
-                    start_time=datetime.now(),
-                    end_time=datetime.now(),
-                    is_valid=False,
-                    error_message=f"API请求失败: {str(e)}",
-                    expected_hours=24.0
-                )
-
-        return self._calculate_roe_for_period(
-            portfolio_data,
-            period='24h',
-            period_label='24小时',
-            expected_hours=24.0
-        )
+        # 使用多周期ROE方法，只返回24h数据（共享缓存，减少API调用）
+        multi_roe = self.calculate_multi_period_roe(user_address, force_refresh)
+        return multi_roe.roe_24h
 
     def calculate_multi_period_roe(self, user_address: str, force_refresh: bool = False) -> MultiPeriodROE:
         """
@@ -521,18 +479,7 @@ class ApexCalculator:
                 self._set_cache_data(cache_key, all_periods)
             except Exception as e:
                 # API请求失败，返回所有周期的无效数据
-                error_roe = ROEMetrics(
-                    period='error',
-                    period_label='错误',
-                    roe_percent=0.0,
-                    start_equity=0.0,
-                    current_equity=0.0,
-                    pnl=0.0,
-                    start_time=datetime.now(),
-                    end_time=datetime.now(),
-                    is_valid=False,
-                    error_message=f"API请求失败: {str(e)}"
-                )
+                error_roe = self._create_invalid_roe('error', '错误', f"API请求失败: {str(e)}")
                 return MultiPeriodROE(
                     roe_24h=error_roe,
                     roe_7d=error_roe,

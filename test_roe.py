@@ -25,18 +25,19 @@ def test_roe_calculation():
         roe_metrics = calculator.calculate_24h_roe(test_address, force_refresh=True)
 
         print(f"✓ ROE计算成功")
+        print(f"  period: {roe_metrics.period}")
         print(f"  is_valid: {roe_metrics.is_valid}")
         print(f"  roe_percent: {roe_metrics.roe_percent:.2f}%")
         print(f"  start_equity: ${roe_metrics.start_equity:,.2f}")
         print(f"  current_equity: ${roe_metrics.current_equity:,.2f}")
-        print(f"  pnl_24h: ${roe_metrics.pnl_24h:,.2f}")
+        print(f"  pnl: ${roe_metrics.pnl:,.2f}")
         print(f"  is_sufficient_history: {roe_metrics.is_sufficient_history}")
 
         if roe_metrics.error_message:
             print(f"  warning: {roe_metrics.error_message}")
 
-        if roe_metrics.account_age_hours:
-            print(f"  account_age_hours: {roe_metrics.account_age_hours:.1f}h")
+        if roe_metrics.period_hours:
+            print(f"  period_hours: {roe_metrics.period_hours:.1f}h")
 
     except Exception as e:
         print(f"✗ 测试失败: {e}")
@@ -99,16 +100,19 @@ def test_roe_calculation():
 
     try:
         test_roe = ROEMetrics(
+            period='24h',
+            period_label='24小时',
             roe_percent=2.5,
             start_equity=10000.0,
             current_equity=10250.0,
-            pnl_24h=250.0,
+            pnl=250.0,
             start_time=datetime.now(),
             end_time=datetime.now(),
             is_valid=True
         )
 
         print("✓ ROEMetrics数据类创建成功")
+        print(f"  period: {test_roe.period}")
         print(f"  roe_percent: {test_roe.roe_percent}%")
         print(f"  is_valid: {test_roe.is_valid}")
 

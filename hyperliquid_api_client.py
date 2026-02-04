@@ -378,69 +378,6 @@ class HyperliquidAPIClient:
             print(f"获取账本记录失败: {e}")
             return []
 
-    def get_user_portfolio(self, user_address: str) -> Dict[str, Any]:
-        """
-        获取用户Portfolio数据（24小时历史数据）
-
-        此API返回用户过去24小时的账户历史数据，包括：
-        - pnlHistory: 24小时内的累计PNL变化历史
-        - accountValueHistory: 24小时内的账户总权益变化历史
-
-        Args:
-            user_address: 用户地址
-
-        Returns:
-            包含"day"数据的字典，格式为：
-            {
-                "pnlHistory": [timestamp_ms, cumulative_pnl_str]列表,
-                "accountValueHistory": [timestamp_ms, account_value_str]列表,
-                ...
-            }
-
-        Raises:
-            Exception: 当API请求失败或响应格式不正确时
-
-        注意:
-            - pnlHistory[-1] 是24小时累计PNL（最新值）
-            - accountValueHistory[0] 是24小时前的账户总权益（起始值）
-            - 时间戳以毫秒为单位
-        """
-        try:
-            payload = {
-                "type": "portfolio",
-                "user": user_address
-            }
-
-            response = self._make_request("/info", payload)
-
-            # Portfolio API返回一个数组，每个元素是[period_type, data]格式
-            # 例如: [["day", {...}], ["week", {...}], ...]
-            # 我们需要提取"day"对应的数据
-            if not isinstance(response, list):
-                raise Exception(f"Portfolio API响应格式异常: 期望list，实际{type(response)}")
-
-            for item in response:
-                if isinstance(item, list) and len(item) >= 2 and item[0] == "day":
-                    day_data = item[1]
-
-                    # 验证必需字段
-                    if not isinstance(day_data, dict):
-                        raise Exception(f"day数据格式异常: 期望dict，实际{type(day_data)}")
-
-                    if "pnlHistory" not in day_data:
-                        raise Exception("day数据缺少必需字段: pnlHistory")
-
-                    if "accountValueHistory" not in day_data:
-                        raise Exception("day数据缺少必需字段: accountValueHistory")
-
-                    return day_data
-
-            # 未找到"day"数据
-            raise Exception('Portfolio响应中未找到"day"数据')
-
-        except Exception as e:
-            raise Exception(f"获取Portfolio数据失败: {e}")
-
     def get_user_portfolio_all_periods(self, user_address: str) -> Dict[str, Dict[str, Any]]:
         """
         获取用户Portfolio所有时间周期的数据
