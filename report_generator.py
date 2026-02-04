@@ -88,19 +88,6 @@ def generate_markdown_report(results: Dict, user_address: str, filename: str = "
 """
 
     # 添加多周期ROE部分
-    def get_roe_rating(roe_percent: float) -> str:
-        """获取ROE评级"""
-        if roe_percent >= 10:
-            return "🔥 极佳"
-        elif roe_percent >= 5:
-            return "✅ 优秀"
-        elif roe_percent >= 0:
-            return "📈 盈利"
-        elif roe_percent >= -5:
-            return "⚠️ 小幅亏损"
-        else:
-            return "📉 较大亏损"
-
     # 获取所有周期的ROE数据
     roe_24h = results.get('roe_24h', {})
     roe_7d = results.get('roe_7d', {})

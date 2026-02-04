@@ -268,19 +268,6 @@ def display_account_info(analysis: AnalysisResults) -> None:
     print(f"  │  └─ 未实现盈亏      ${total_unrealized_pnl:>12,.2f}")
 
     # 多周期ROE指标
-    def get_roe_rating(roe_percent: float) -> str:
-        """获取ROE评级"""
-        if roe_percent >= 10:
-            return "🔥 极佳"
-        elif roe_percent >= 5:
-            return "✅ 优秀"
-        elif roe_percent >= 0:
-            return "📈 盈利"
-        elif roe_percent >= -5:
-            return "⚠️ 小幅亏损"
-        else:
-            return "📉 较大亏损"
-
     # 获取所有周期的ROE数据
     roe_24h = raw_results.get('roe_24h', {})
     roe_7d = raw_results.get('roe_7d', {})
