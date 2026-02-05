@@ -28,7 +28,7 @@ from typing import List, Dict, Any, Optional, Union
 from decimal import Decimal, getcontext
 from datetime import datetime, timedelta
 from dataclasses import dataclass
-from hyperliquid_api_client import HyperliquidAPIClient, safe_float, safe_int
+from hyperliquid_api_client import HyperliquidAPIClient, safe_float
 
 # 设置高精度小数计算（50位精度）
 getcontext().prec = 50
@@ -188,7 +188,7 @@ class ApexCalculator:
                 raise ValueError(f"无效的用户地址格式: {user_address}")
 
             # 获取完整投资组合数据
-            portfolio_data = self.api_client.get_user_portfolio_data(user_address)
+            portfolio_data = self.api_client.get_user_full_data(user_address)
 
             if not portfolio_data:
                 raise Exception("未能获取用户数据，可能地址无交易记录或API不可用")
@@ -206,84 +206,6 @@ class ApexCalculator:
             print(f"✗ 获取用户数据失败: {e}")
             return {}
     
-    def get_user_fills(self, user_address: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
-        """
-        获取用户成交记录
-
-        参数：
-            user_address: 用户钱包地址
-            force_refresh: 是否强制刷新缓存
-
-        返回：
-            成交记录列表，包含交易时间、价格、数量、PnL等信息
-        """
-        cache_key = f"fills_{user_address}"
-
-        if not force_refresh:
-            cached_data = self._get_cached_data(cache_key)
-            if cached_data:
-                return cached_data
-
-        try:
-            fills = self.api_client.get_user_fills(user_address)
-            self._set_cache_data(cache_key, fills)
-            return fills
-        except Exception as e:
-            print(f"✗ 获取成交记录失败: {e}")
-            return []
-
-    def get_user_asset_positions(self, user_address: str, force_refresh: bool = False) -> List[Dict[str, Any]]:
-        """
-        获取用户当前资产持仓
-
-        参数：
-            user_address: 用户钱包地址
-            force_refresh: 是否强制刷新缓存
-
-        返回：
-            资产持仓列表，包含持仓数量、未实现盈亏等信息
-        """
-        cache_key = f"positions_{user_address}"
-
-        if not force_refresh:
-            cached_data = self._get_cached_data(cache_key)
-            if cached_data:
-                return cached_data
-
-        try:
-            positions = self.api_client.get_user_asset_positions(user_address)
-            self._set_cache_data(cache_key, positions)
-            return positions
-        except Exception as e:
-            print(f"✗ 获取资产持仓失败: {e}")
-            return []
-
-    def get_user_margin_summary(self, user_address: str, force_refresh: bool = False) -> Dict[str, Any]:
-        """
-        获取用户保证金摘要
-
-        参数：
-            user_address: 用户钱包地址
-            force_refresh: 是否强制刷新缓存
-
-        返回：
-            保证金摘要数据，包含账户价值、已用保证金等信息
-        """
-        cache_key = f"margin_{user_address}"
-
-        if not force_refresh:
-            cached_data = self._get_cached_data(cache_key)
-            if cached_data:
-                return cached_data
-
-        try:
-            margin_summary = self.api_client.get_user_margin_summary(user_address)
-            self._set_cache_data(cache_key, margin_summary)
-            return margin_summary
-        except Exception as e:
-            print(f"✗ 获取保证金摘要失败: {e}")
-            return {}
-
     def _create_invalid_roe(
         self,
         period: str,
@@ -423,26 +345,6 @@ class ApexCalculator:
             expected_hours=expected_hours,
             is_sufficient_history=is_sufficient
         )
-
-    def calculate_24h_roe(self, user_address: str, force_refresh: bool = False) -> ROEMetrics:
-        """
-        计算24小时ROE (Return on Equity)
-
-        ROE公式：
-            24h ROE (%) = (24h累计PNL / 起始权益) × 100
-
-        Args:
-            user_address: 用户钱包地址
-            force_refresh: 是否强制刷新缓存
-
-        Returns:
-            ROEMetrics对象，包含完整的ROE指标数据
-
-        注意：此方法保留用于向后兼容，建议使用calculate_multi_period_roe()
-        """
-        # 使用多周期ROE方法，只返回24h数据（共享缓存，减少API调用）
-        multi_roe = self.calculate_multi_period_roe(user_address, force_refresh)
-        return multi_roe.roe_24h
 
     def calculate_multi_period_roe(self, user_address: str, force_refresh: bool = False) -> MultiPeriodROE:
         """
@@ -818,7 +720,7 @@ class ApexCalculator:
         month_hold_times = []
         all_hold_times = []
 
-        for open_time, close_time, position_size in completed_positions:
+        for open_time, close_time, _ in completed_positions:
             open_dt = datetime.fromtimestamp(open_time / 1000)
             close_dt = datetime.fromtimestamp(close_time / 1000)
 

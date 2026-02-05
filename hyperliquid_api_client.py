@@ -466,7 +466,7 @@ class HyperliquidAPIClient:
         except Exception as e:
             raise Exception(f"获取Portfolio所有周期数据失败: {e}")
 
-    def get_user_portfolio_data(self, user_address: str) -> Dict[str, Any]:
+    def get_user_full_data(self, user_address: str) -> Dict[str, Any]:
         """
         获取用户完整的投资组合数据
 
