@@ -87,12 +87,16 @@ def filter_results_by_criteria(results: List[BatchAddressResult]) -> List[BatchA
         roe_24h = roe_24h_data.get('roe_percent', 0) if roe_24h_data.get('is_valid') else 0
         roe_7d = roe_7d_data.get('roe_percent', 0) if roe_7d_data.get('is_valid') else 0
 
+        # 盈利因子
+        profit_factor = result.profit_factor
+
         # 应用筛选条件
         if (total_trades > 10 and
             min_return_7d > -8 and
             hold_time_7d < 1 and
             roe_24h > -10 and
-            roe_7d > 10):
+            roe_7d > 10 and
+            profit_factor > 1.5):
             filtered.append(result)
 
     return filtered
