@@ -24,7 +24,7 @@ API文档: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api
 
 import math
 import time
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
 from decimal import Decimal, getcontext
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -430,7 +430,7 @@ class ApexCalculator:
 
     def calculate_profit_factor(self, fills: List[Dict], asset_positions: Optional[List[Dict]] = None) -> float:
         """
-        计算盈亏因子（基于Apex Liquid Bot算法）
+        计算盈亏因子（基于最近30天交易记录）
 
         盈亏因子 = 总盈利 / 总亏损
         该指标反映了交易策略的盈利能力，大于1表示盈利，小于1表示亏损
@@ -445,10 +445,11 @@ class ApexCalculator:
             - 0.0: 无交易记录时
 
         算法说明：
-            1. 累计所有已实现盈亏（来自fills）
-            2. 累计所有未实现盈亏（来自当前持仓）
-            3. 计算总盈利和总亏损的比值
-            4. 当无亏损时返回 1000.0（代表无穷大）
+            1. 仅使用最近30天的交易记录
+            2. 累计已实现盈亏（来自fills）
+            3. 累计未实现盈亏（来自当前持仓）
+            4. 计算总盈利和总亏损的比值
+            5. 当无亏损时返回 1000.0（代表无穷大）
         """
         if not fills and not asset_positions:
             return 0.0
@@ -456,8 +457,15 @@ class ApexCalculator:
         total_gains = Decimal('0')
         total_losses = Decimal('0')
 
-        # 处理已实现盈亏（来自成交记录）
+        # 计算30天前的时间戳（毫秒）
+        cutoff_time = (datetime.now() - timedelta(days=30)).timestamp() * 1000
+
+        # 处理已实现盈亏（仅最近30天的成交记录）
         for fill in fills:
+            # 过滤：只处理最近30天的交易
+            fill_time = fill.get('time', 0)
+            if fill_time < cutoff_time:
+                continue
             closed_pnl = Decimal(str(fill.get('closedPnl', 0)))
             if closed_pnl > 0:
                 total_gains += closed_pnl
@@ -803,7 +811,7 @@ class ApexCalculator:
                 }
             }
 
-            # 指标1: 盈亏因子 (Profit Factor)
+            # 指标1: 盈亏因子 (Profit Factor) - 基于最近30天
             if fills:
                 profit_factor = self.calculate_profit_factor(fills, asset_positions)
                 results["profit_factor"] = profit_factor
