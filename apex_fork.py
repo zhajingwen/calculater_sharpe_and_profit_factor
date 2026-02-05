@@ -840,7 +840,14 @@ class ApexCalculator:
                 position_analysis = self._analyze_current_positions(asset_positions)
                 results["position_analysis"] = position_analysis
             else:
-                results["position_analysis"] = {"total_positions": 0, "total_unrealized_pnl": 0}
+                results["position_analysis"] = {
+                    "total_positions": 0,
+                    "total_unrealized_pnl": 0,
+                    "total_position_value": 0,
+                    "long_positions": 0,
+                    "short_positions": 0,
+                    "position_bias": "中性"
+                }
 
             # 指标7: 累计总PNL (Total Cumulative PnL)
             total_realized_pnl = sum(safe_float(fill.get('closedPnl', 0)) for fill in fills)
@@ -873,11 +880,11 @@ class ApexCalculator:
                 results["return_metrics_on_trades"] = return_metrics_on_trades
             else:
                 results["return_metrics_on_trades"] = {
-                    "cumulative_return": 0,
-                    "annualized_return": 0,
+                    "mean_return": 0,
+                    "min_return_7d": 0,
+                    "total_trades": 0,
                     "trading_days": 0,
-                    "annualized_return_valid": False,
-                    "annualized_return_warnings": ["NO_TRADES"]
+                    "total_pnl": 0
                 }
 
             # 指标11: 多周期ROE（24小时、7天、30天、历史总计）

@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hyperliquid 交易地址分析报告</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border-color: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent-cyan: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-yellow: #d29922;
+            --accent-purple: #a371f7;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .header .subtitle {
+            color: var(--text-secondary);
+            margin-top: 8px;
+            font-size: 0.9rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .stat-card .label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-bottom: 4px;
+        }
+
+        .stat-card .value {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .stat-card .value.positive {
+            color: var(--accent-green);
+        }
+
+        .stat-card .value.negative {
+            color: var(--accent-red);
+        }
+
+        .table-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .table-header h2 {
+            font-size: 1.1rem;
+            color: var(--text-primary);
+        }
+
+        .table-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .search-input {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            width: 250px;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th {
+            background: var(--bg-tertiary);
+            color: var(--accent-cyan);
+            font-weight: 600;
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+
+        th:hover {
+            background: var(--bg-primary);
+        }
+
+        th .sort-icon {
+            margin-left: 4px;
+            opacity: 0.3;
+        }
+
+        th.sort-asc .sort-icon,
+        th.sort-desc .sort-icon {
+            opacity: 1;
+        }
+
+        th.sort-asc .sort-icon::after {
+            content: '▲';
+        }
+
+        th.sort-desc .sort-icon::after {
+            content: '▼';
+        }
+
+        th:not(.sort-asc):not(.sort-desc) .sort-icon::after {
+            content: '⇅';
+        }
+
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .rank {
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .address {
+            font-family: 'SF Mono', Monaco, 'Andale Mono', monospace;
+            color: var(--accent-purple);
+            font-size: 0.85rem;
+        }
+
+        .positive {
+            color: var(--accent-green);
+        }
+
+        .negative {
+            color: var(--accent-red);
+        }
+
+        .neutral {
+            color: var(--text-secondary);
+        }
+
+        .highlight {
+            font-weight: 600;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-top: 30px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .column-toggle {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 16px;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .column-toggle:hover {
+            background: var(--bg-primary);
+        }
+
+        .column-menu {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            z-index: 100;
+            display: none;
+            min-width: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .column-menu.show {
+            display: block;
+        }
+
+        .column-menu label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .column-menu label:hover {
+            color: var(--accent-cyan);
+        }
+
+        .column-menu-buttons {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .column-menu-btn {
+            flex: 1;
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .column-menu-btn:hover {
+            background: var(--accent-cyan);
+            color: var(--bg-primary);
+            border-color: var(--accent-cyan);
+        }
+
+        /* 筛选器样式 */
+        .filter-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+
+        .filter-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .filter-header h3 {
+            font-size: 1rem;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .filter-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-select, .filter-input {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+        }
+
+        .filter-select {
+            min-width: 140px;
+        }
+
+        .filter-input {
+            width: 100px;
+        }
+
+        .filter-select:focus, .filter-input:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+        }
+
+        .filter-btn {
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-btn-add {
+            background: var(--accent-cyan);
+            color: var(--bg-primary);
+            border-color: var(--accent-cyan);
+        }
+
+        .filter-btn-add:hover {
+            background: #4090e0;
+        }
+
+        .filter-btn-remove {
+            background: var(--bg-tertiary);
+            color: var(--accent-red);
+            border-color: var(--accent-red);
+            padding: 8px 12px;
+        }
+
+        .filter-btn-remove:hover {
+            background: var(--accent-red);
+            color: white;
+        }
+
+        .filter-btn-clear {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .filter-btn-clear:hover {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .filter-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .filter-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--accent-cyan);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 0.8rem;
+            color: var(--accent-cyan);
+        }
+
+        .filter-badge-remove {
+            cursor: pointer;
+            color: var(--accent-red);
+            font-weight: bold;
+        }
+
+        .active-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .filter-result-count {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-left: auto;
+        }
+
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .table-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-input {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Hyperliquid 交易地址分析报告</h1>
+            <p class="subtitle">生成时间: 2026-02-05 16:49:58 | 数据来源: Hyperliquid API</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="label">分析地址数</div>
+                <div class="value">36 / 36</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">平均夏普比率</div>
+                <div class="value positive">114.81</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">平均胜率</div>
+                <div class="value">77.2%</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">总累计盈亏</div>
+                <div class="value positive">$425,170</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">盈利地址数</div>
+                <div class="value positive">35 / 36</div>
+            </div>
+        </div>
+
+        <div class="filter-container">
+            <div class="filter-header">
+                <h3>🔧 指标筛选</h3>
+                <span class="filter-result-count" id="filterResultCount"></span>
+            </div>
+            <div class="filter-list" id="filterList">
+                <!-- 筛选条件将由 JS 生成 -->
+            </div>
+            <div class="filter-actions">
+                <button class="filter-btn filter-btn-add" id="addFilterBtn">+ 添加筛选条件</button>
+                <button class="filter-btn filter-btn-clear" id="clearFiltersBtn">清除全部</button>
+            </div>
+            <div class="active-filters" id="activeFilters">
+                <!-- 活动筛选标签将由 JS 生成 -->
+            </div>
+        </div>
+
+        <div class="table-container">
+            <div class="table-header">
+                <h2>📊 详细数据表格</h2>
+                <div class="table-controls">
+                    <input type="text" class="search-input" id="searchInput" placeholder="搜索地址...">
+                    <div style="position: relative;">
+                        <button class="column-toggle" id="columnToggle">显示列 ▼</button>
+                        <div class="column-menu" id="columnMenu">
+                            <!-- 列选择器将由 JS 生成 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="table-wrapper">
+                <table id="dataTable">
+                    <thead>
+                        <tr id="tableHeader">
+                            <!-- 表头将由 JS 生成 -->
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <!-- 数据将由 JS 生成 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>📈 Apex Fork - 交易分析系统 | 基于 Hyperliquid 官方 API</p>
+            <p>所有指标基于单笔交易收益率计算，不依赖本金数据</p>
+        </div>
+    </div>
+
+    <script>
+        // 表格数据
+        const tableData = [{"rank": 1, "address": "0x3866a89f0b7f13b3eea471022fc2182347ff61af", "total_trades": 50, "win_rate": 100.0, "sharpe_ratio": 2896.4443524686167, "profit_factor": 1000.0, "total_pnl": 127.286045, "total_realized_pnl": 127.286045, "total_unrealized_pnl": 0, "account_value": 10425.773391, "perp_account_value": 426.163391, "spot_account_value": 9999.61, "total_margin_used": 0.0, "mean_return": 10.670824372759856, "std_return": 0.9845110765450684, "min_return_7d": 8.90967741935484, "trades_per_year": 71414.62831376238, "trading_days": 0.025554988425925927, "bias": 47.0, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.017495319444444445, "hold_time_today": 0.017495319444444445, "hold_time_7d": 0.017495319444444445, "hold_time_30d": 0.017495319444444445, "roe_24h": 15.82100794319094, "roe_7d": 19.46604515086107, "roe_30d": 37.31007757640337, "roe_all": -116.29780923746644}, {"rank": 2, "address": "0x3bdb59d8f7f62ae9231df716f8461fd97a2ae57b", "total_trades": 108, "win_rate": 100.0, "sharpe_ratio": 622.178625334907, "profit_factor": 7.886855630013618, "total_pnl": 21.694766, "total_realized_pnl": 24.844936, "total_unrealized_pnl": -3.1501699999999997, "account_value": 126.505294, "perp_account_value": 126.505294, "spot_account_value": 0.0, "total_margin_used": 26.197436, "mean_return": 6.080750466374886, "std_return": 1.745128882918617, "min_return_7d": 1.1559620250226317, "trades_per_year": 31895.89002604294, "trading_days": 0.2517565740740741, "bias": 0.9259259259259238, "long_positions": 1, "short_positions": 2, "total_positions": 3, "position_bias": "空头", "total_position_value": 250.39002, "avg_hold_time": 0.14167379082722834, "hold_time_today": 0.14167379082722834, "hold_time_7d": 0.14167379082722834, "hold_time_30d": 0.14167379082722834, "roe_24h": 19.315813993351757, "roe_7d": 19.315813993351757, "roe_30d": 19.315813993351757, "roe_all": 19.315813993351757}, {"rank": 3, "address": "0x138fb48dc319a514e13217acdb7ef97441f1b515", "total_trades": 271, "win_rate": 97.14285714285714, "sharpe_ratio": 142.8459329589775, "profit_factor": 2.7799140200854766, "total_pnl": 25.452920000000002, "total_realized_pnl": 33.427964, "total_unrealized_pnl": -7.975044000000001, "account_value": 221.575735, "perp_account_value": 221.575735, "spot_account_value": 0.0, "total_margin_used": 101.377233, "mean_return": 2.9762107248689373, "std_return": 2.70138273236486, "min_return_7d": -0.1181401017248455, "trades_per_year": 16820.530648150245, "trading_days": 1.5189770486111112, "bias": 1.8450184501845044, "long_positions": 1, "short_positions": 3, "total_positions": 4, "position_bias": "空头", "total_position_value": 1002.610132, "avg_hold_time": 0.10958978875799884, "hold_time_today": 0.12836873438591895, "hold_time_7d": 0.10958978875799884, "hold_time_30d": 0.10958978875799884, "roe_24h": -1.0343312936312445, "roe_7d": 11.01200780607158, "roe_30d": 11.01200780607158, "roe_all": 11.01200780607158}, {"rank": 4, "address": "0x0c9556f7b6897673d280d625e9540dd8022c19cf", "total_trades": 560, "win_rate": 89.80582524271846, "sharpe_ratio": 68.74772377136014, "profit_factor": 271.48206002371114, "total_pnl": 13133.097381, "total_realized_pnl": 13133.097381, "total_unrealized_pnl": 0, "account_value": 0.16927801, "perp_account_value": 0.169278, "spot_account_value": 1e-08, "total_margin_used": 0.0, "mean_return": 4.375705216511219, "std_return": 8.86823368745798, "min_return_7d": -0.04334136671072067, "trades_per_year": 19474.848822601485, "trading_days": 3.8608772106481486, "bias": 71.60714285714286, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.8573142235604095, "hold_time_today": 0, "hold_time_7d": 0.8573142235604095, "hold_time_30d": 0.8573142235604095, "roe_24h": 0.03757964152922438, "roe_7d": 52.219390651560346, "roe_30d": 52.219390651560346, "roe_all": 52.219390651560346}, {"rank": 5, "address": "0xbd7b48a5f74fec74643899795b6964a8fac7e69a", "total_trades": 722, "win_rate": 87.21174004192872, "sharpe_ratio": 63.47725606083973, "profit_factor": 6.65664040109042, "total_pnl": 23454.616512, "total_realized_pnl": 23454.616512, "total_unrealized_pnl": 0, "account_value": 56264.124924, "perp_account_value": 55749.381924, "spot_account_value": 514.7429999999999, "total_margin_used": 0.0, "mean_return": 0.5900434678967831, "std_return": 1.086265551775673, "min_return_7d": -2.9790919434555962, "trades_per_year": 13664.460209273877, "trading_days": 12.74144732638889, "bias": 59.69529085872576, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.021151391419491527, "hold_time_today": 0.06735904285099052, "hold_time_7d": 0.026212749623964682, "hold_time_30d": 0.021151391419491527, "roe_24h": 2.309525095256915, "roe_7d": 46.586616364995514, "roe_30d": 42.35094603673566, "roe_all": 42.35094603673566}, {"rank": 6, "address": "0x972941561bf9b5200cd0c7ee592fdb401e2ba2d1", "total_trades": 4709, "win_rate": 78.02485284499673, "sharpe_ratio": 31.997222693496322, "profit_factor": 3.2398175201587254, "total_pnl": 3692.67930774, "total_realized_pnl": 3692.67930774, "total_unrealized_pnl": 0, "account_value": 1922.0929561, "perp_account_value": 1633.088404, "spot_account_value": 289.00455209999996, "total_margin_used": 0.0, "mean_return": 1.2339653235361674, "std_return": 2.6574513823335293, "min_return_7d": -3.5140093109374395, "trades_per_year": 4755.776267269747, "trading_days": 117.34887611111111, "bias": 40.00849437247823, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.1178582994401155, "hold_time_today": 0.002171543195480929, "hold_time_7d": 0.007290548089462702, "hold_time_30d": 0.28650304900047313, "roe_24h": 52.17178447483967, "roe_7d": 51.82539202139067, "roe_30d": 84.44594022181101, "roe_all": 428.22622082082444}, {"rank": 7, "address": "0xd0a3ed257bbf5c2ad98b6269c05089fd8735ce09", "total_trades": 1750, "win_rate": 74.20454545454545, "sharpe_ratio": 28.198363797870662, "profit_factor": 2.052221771526747, "total_pnl": 11405.96847104, "total_realized_pnl": 11405.96847104, "total_unrealized_pnl": 0, "account_value": 3204.4773599, "perp_account_value": 3204.464493, "spot_account_value": 0.0128669, "total_margin_used": 0.0, "mean_return": 3.1882960712708885, "std_return": 5.732522321665702, "min_return_7d": -3.248858995916406, "trades_per_year": 2572.6762077797, "trading_days": 124.85053464120371, "bias": 35.77142857142857, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.16454014411252, "hold_time_today": 0, "hold_time_7d": 0.046487948717948716, "hold_time_30d": 0.21135500640759214, "roe_24h": 5.383667794622336, "roe_7d": 12.808641116644967, "roe_30d": 33.71183878446373, "roe_all": 1004.2393240436031}, {"rank": 8, "address": "0xda8ea8c8da09afec518a955aba00c3f3efa8f168", "total_trades": 3347, "win_rate": 87.0859337493999, "sharpe_ratio": 26.77601556120182, "profit_factor": 11.761709257808139, "total_pnl": 93432.62779888, "total_realized_pnl": 93432.62779888, "total_unrealized_pnl": 0, "account_value": 128064.23888493, "perp_account_value": 98256.319214, "spot_account_value": 29807.919670930005, "total_margin_used": 0.0, "mean_return": 0.6341026418537278, "std_return": 3.2382600764373457, "min_return_7d": -3.719673138807536, "trades_per_year": 18712.41948084122, "trading_days": 40.63050215277778, "bias": 80.77382730803706, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.03007760117059306, "hold_time_today": 0.03335261574074074, "hold_time_7d": 0.036335130905385454, "hold_time_30d": 0.033270994126023495, "roe_24h": 2.8101856704357084, "roe_7d": 16.78982213733264, "roe_30d": 88.93542151988511, "roe_all": 137.2935514826026}, {"rank": 9, "address": "0xcc8e811404efeea2bfa2002db251ebabf43cb94a", "total_trades": 19, "win_rate": 100.0, "sharpe_ratio": 26.42313258224242, "profit_factor": 1000.0, "total_pnl": 11.058816, "total_realized_pnl": 11.058816, "total_unrealized_pnl": 0, "account_value": 621.0865590000001, "perp_account_value": 472.206559, "spot_account_value": 148.88, "total_margin_used": 0.0, "mean_return": 2.5538249910803783, "std_return": 1.5074175821044578, "min_return_7d": 0.02686727565824825, "trades_per_year": 243.3727912738445, "trading_days": 11.998054444444444, "bias": 5.2631578947368425, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.07932916221509971, "hold_time_today": 0.06641972222222223, "hold_time_7d": 0.06641972222222223, "hold_time_30d": 0.07932916221509971, "roe_24h": 5.132975835344253, "roe_7d": 17.945194774817157, "roe_30d": 21.32090383545097, "roe_all": 410.3325304884786}, {"rank": 10, "address": "0x4f923e42793f2d9259e8ac95f2f01c2abf30ed0b", "total_trades": 29, "win_rate": 50.0, "sharpe_ratio": 24.254925048687355, "profit_factor": 2.808932106307183, "total_pnl": 136.23656499999998, "total_realized_pnl": 126.19104499999999, "total_unrealized_pnl": 10.04552, "account_value": 729.6002410000001, "perp_account_value": 304.729549, "spot_account_value": 424.870692, "total_margin_used": 301.260433, "mean_return": 2.245742903605622, "std_return": 4.69260940218551, "min_return_7d": -3.955695265216883, "trades_per_year": 2570.942252222139, "trading_days": 1.987598125, "bias": 31.03448275862069, "long_positions": 1, "short_positions": 0, "total_positions": 1, "position_bias": "多头", "total_position_value": 1807.5626, "avg_hold_time": 0.12247669890873016, "hold_time_today": 0.07503224537037037, "hold_time_7d": 0.12247669890873016, "hold_time_30d": 0.12247669890873016, "roe_24h": 8.104805699245603, "roe_7d": 41.78136284875244, "roe_30d": 41.78136284875244, "roe_all": 41.78136284875244}, {"rank": 11, "address": "0x2bed4b06bbdbcc66a470fbc662aa788d59795c79", "total_trades": 549, "win_rate": 80.27027027027027, "sharpe_ratio": 22.718393643085566, "profit_factor": 2.5767835899078233, "total_pnl": 1801.178392, "total_realized_pnl": 1801.178392, "total_unrealized_pnl": 0, "account_value": 9669.533846, "perp_account_value": 9669.533846, "spot_account_value": 0.0, "total_margin_used": 0.0, "mean_return": 0.24012507536937316, "std_return": 0.8040689303428437, "min_return_7d": -3.540690707048698, "trades_per_year": 5789.779082424485, "trading_days": 23.325587743055554, "bias": 67.39526411657559, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.006663482445546234, "hold_time_today": 0.00012987373737373737, "hold_time_7d": 0.012256784990462566, "hold_time_30d": 0.006663482445546234, "roe_24h": 3.4703395376600965, "roe_7d": 17.75405435191905, "roe_30d": 123.10317244295017, "roe_all": 123.10317244295017}, {"rank": 12, "address": "0x8b7e5e83679e10fcc9aadbb73e2476b7e2c4cc27", "total_trades": 907, "win_rate": 84.85576923076923, "sharpe_ratio": 17.67303048593042, "profit_factor": 1.5885983770939918, "total_pnl": 831.8574460000001, "total_realized_pnl": 835.8870320000001, "total_unrealized_pnl": -4.029586, "account_value": 526.774379, "perp_account_value": 526.774379, "spot_account_value": 0.0, "total_margin_used": 45.872489, "mean_return": 0.8263171195226321, "std_return": 2.3405901712771753, "min_return_7d": 0.049451092869152405, "trades_per_year": 2512.5891206089013, "trading_days": 60.431687280092596, "bias": 4.189636163175301, "long_positions": 0, "short_positions": 1, "total_positions": 1, "position_bias": "空头", "total_position_value": 254.064063, "avg_hold_time": 0.1340852134573894, "hold_time_today": 0, "hold_time_7d": 0.09895009553872054, "hold_time_30d": 0.1609840656961878, "roe_24h": 2.7857167443570745, "roe_7d": 36.51208524948439, "roe_30d": 69.82957501170279, "roe_all": 202.2388027887879}, {"rank": 13, "address": "0xc3921e7d79c020274f19c24894c759fc917a8f3a", "total_trades": 117, "win_rate": 60.0, "sharpe_ratio": 16.264692479482097, "profit_factor": 2.1592355799269867, "total_pnl": 342.29093673000006, "total_realized_pnl": 342.29093673000006, "total_unrealized_pnl": 0, "account_value": 2.6911685499999995, "perp_account_value": 0.0, "spot_account_value": 2.6911685499999995, "total_margin_used": 0.0, "mean_return": 0.6692953341513537, "std_return": 2.436936313783975, "min_return_7d": -4.069552349241583, "trades_per_year": 3532.919400493593, "trading_days": 5.682269456018519, "bias": 85.04273504273505, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.30289773861618463, "hold_time_today": 0, "hold_time_7d": 0.3065688933899177, "hold_time_30d": 0.30289773861618463, "roe_24h": 4.662574571008099, "roe_7d": 16.479809704092176, "roe_30d": 16.479809704092176, "roe_all": 16.479809704092176}, {"rank": 14, "address": "0x031fac9c6d5d4554bd976174d572ec4ff5a84e32", "total_trades": 695, "win_rate": 65.359477124183, "sharpe_ratio": 16.10905699825581, "profit_factor": 2.4523469837668683, "total_pnl": 1270.6096149999998, "total_realized_pnl": 1299.586255, "total_unrealized_pnl": -28.976639999999996, "account_value": 1964.3338574299999, "perp_account_value": 1963.975716, "spot_account_value": 0.35814143, "total_margin_used": 214.480935, "mean_return": 1.1445074223150202, "std_return": 4.508337008519295, "min_return_7d": -5.38013833436428, "trades_per_year": 4085.894325803645, "trading_days": 27.335508726851852, "bias": 52.23021582733813, "long_positions": 1, "short_positions": 1, "total_positions": 2, "position_bias": "中性", "total_position_value": 4291.24044, "avg_hold_time": 1.0296107983049185, "hold_time_today": 0.4727808634259259, "hold_time_7d": 0.84740784375, "hold_time_30d": 1.0296107983049185, "roe_24h": 26.52487379066778, "roe_7d": 44.08888976733264, "roe_30d": 426404.420778338, "roe_all": 321651.0807538354}, {"rank": 15, "address": "0x7a6619c6f52063c4143d3142be56adbeec6a7b70", "total_trades": 363, "win_rate": 90.0, "sharpe_ratio": 15.754716460852467, "profit_factor": 24.64214476455248, "total_pnl": 51.44103369, "total_realized_pnl": 51.44103369, "total_unrealized_pnl": 0, "account_value": 98.58780777000001, "perp_account_value": 98.585108, "spot_account_value": 0.00269977, "total_margin_used": 0.0, "mean_return": 0.9351419640266128, "std_return": 3.1445461342985404, "min_return_7d": -0.6691800188501412, "trades_per_year": 2808.041743244022, "trading_days": 18.19773517361111, "bias": 38.29201101928375, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.029446979244345018, "hold_time_today": 0.0041226468079922024, "hold_time_7d": 0.008436287249893572, "hold_time_30d": 0.029446979244345018, "roe_24h": 12.940321826705024, "roe_7d": 517047.35087069287, "roe_30d": 94.80810558094166, "roe_all": 94.80810558094166}, {"rank": 16, "address": "0x845b62df45ba760938fc3c6d90a9d30ba3f98038", "total_trades": 672, "win_rate": 85.30465949820788, "sharpe_ratio": 14.503910251470776, "profit_factor": 1.7398337463216287, "total_pnl": 692.955501, "total_realized_pnl": 691.560961, "total_unrealized_pnl": 1.39454, "account_value": 2919.352794, "perp_account_value": 2373.212794, "spot_account_value": 546.14, "total_margin_used": 333.579866, "mean_return": 0.8382507725300452, "std_return": 2.616603781705835, "min_return_7d": -4.851485369492536, "trades_per_year": 2071.5645829831915, "trading_days": 49.158496354166665, "bias": 7.366071428571431, "long_positions": 1, "short_positions": 0, "total_positions": 1, "position_bias": "多头", "total_position_value": 1000.7396, "avg_hold_time": 0.5467507392120895, "hold_time_today": 0.11164688430958132, "hold_time_7d": 0.31882018256013744, "hold_time_30d": 0.6180513098079944, "roe_24h": 9.852169452055291, "roe_7d": 19.33565869399999, "roe_30d": 18.32886287215739, "roe_all": 25.861329549483326}, {"rank": 17, "address": "0x78006e0be97ce9cbda340f8ae7b11d3e48610ed4", "total_trades": 347, "win_rate": 64.5320197044335, "sharpe_ratio": 12.023087679775786, "profit_factor": 5.806841787228845, "total_pnl": 1523.595304, "total_realized_pnl": 1523.595304, "total_unrealized_pnl": 0, "account_value": 1343.72939, "perp_account_value": 1343.72939, "spot_account_value": 0.0, "total_margin_used": 0.0, "mean_return": 0.9694529640079355, "std_return": 1.9085564671787676, "min_return_7d": -3.9047888787690277, "trades_per_year": 560.4318166415395, "trading_days": 132.21055229166666, "bias": 31.988472622478387, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.018496014021834335, "hold_time_today": 0.000565988425925926, "hold_time_7d": 0.10286520625593543, "hold_time_30d": 0.10312434211910775, "roe_24h": 0.3588774980564772, "roe_7d": 139.57907570641964, "roe_30d": 275.8645506765548, "roe_all": 275.8645506765548}, {"rank": 18, "address": "0x53cc2ef0a7c76fd25c4fc5ab6a6d14d1b8fcce16", "total_trades": 2509, "win_rate": 81.24183006535948, "sharpe_ratio": 11.924478944604742, "profit_factor": 4.418056695810844, "total_pnl": 26063.71520298, "total_realized_pnl": 26063.71520298, "total_unrealized_pnl": 0, "account_value": 9837.68171152, "perp_account_value": 9825.973632, "spot_account_value": 11.708079519999998, "total_margin_used": 0.0, "mean_return": 1.4204839723136111, "std_return": 8.051041206762925, "min_return_7d": -1.618937048503612, "trades_per_year": 4571.972867124413, "trading_days": 122.14639417824074, "bias": 56.43682742128338, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.07942579084545856, "hold_time_today": 0.0016059123213125407, "hold_time_7d": 0.0017107703993055558, "hold_time_30d": 0.2441106848602989, "roe_24h": 7.709987833800754, "roe_7d": 12.40371828563887, "roe_30d": 33.45523123312396, "roe_all": 1642.2309958151238}, {"rank": 19, "address": "0x3d6fcedf93c9d3650e498ceb35607e854ee73eaf", "total_trades": 65, "win_rate": 77.41935483870968, "sharpe_ratio": 11.853579835654992, "profit_factor": 1000.0, "total_pnl": 111.475812, "total_realized_pnl": 70.372622, "total_unrealized_pnl": 41.10319, "account_value": 891.057877, "perp_account_value": 891.057877, "spot_account_value": 0.0, "total_margin_used": 748.852242, "mean_return": 1.952908118584, "std_return": 3.0068288555919525, "min_return_7d": 4.8042108086361806, "trades_per_year": 334.035656636195, "trading_days": 33.87362928240741, "bias": 24.615384615384617, "long_positions": 0, "short_positions": 3, "total_positions": 3, "position_bias": "空头", "total_position_value": 667.564608, "avg_hold_time": 0.3440089176587302, "hold_time_today": 0, "hold_time_7d": 0.6185982470538721, "hold_time_30d": 0.6185982470538721, "roe_24h": 5.062035253820466, "roe_7d": 822475.6805573474, "roe_30d": 822475.6805573474, "roe_all": 822475.6805573474}, {"rank": 20, "address": "0x618d69438f6c5785a72d0024a8cb73b81c356e34", "total_trades": 5651, "win_rate": 67.36660929432013, "sharpe_ratio": 11.301419374161718, "profit_factor": 4.3541669894704, "total_pnl": 48970.06191589, "total_realized_pnl": 48960.13430589, "total_unrealized_pnl": 9.92761, "account_value": 13321.83162346, "perp_account_value": 9442.013595, "spot_account_value": 3879.81802846, "total_margin_used": 216.875, "mean_return": 1.1242520544620682, "std_return": 5.094688863303832, "min_return_7d": -3.4963110387960246, "trades_per_year": 2664.39173739513, "trading_days": 397.96137524305556, "bias": 42.78003893116262, "long_positions": 1, "short_positions": 0, "total_positions": 1, "position_bias": "多头", "total_position_value": 1735.0, "avg_hold_time": 1.0863743572320737, "hold_time_today": 0.4008176754833878, "hold_time_7d": 0.669230032750814, "hold_time_30d": 0.6932023150852146, "roe_24h": 7.080191060092941, "roe_7d": 41.06011561894805, "roe_30d": 190.13072565813474, "roe_all": 252.10601600989375}, {"rank": 21, "address": "0x20ebb54b4f0285da14e48698287f2baeaa7796b7", "total_trades": 136, "win_rate": 71.62162162162163, "sharpe_ratio": 7.239864114277998, "profit_factor": 2.3493955673540645, "total_pnl": 397.98168300000003, "total_realized_pnl": 437.120694, "total_unrealized_pnl": -39.139011, "account_value": 320.453533, "perp_account_value": 320.453533, "spot_account_value": 0.0, "total_margin_used": 189.239871, "mean_return": 1.1891995989239428, "std_return": 4.848217457876734, "min_return_7d": -1.3208533282653112, "trades_per_year": 874.8707182561756, "trading_days": 30.87313295138889, "bias": 37.5, "long_positions": 0, "short_positions": 1, "total_positions": 1, "position_bias": "空头", "total_position_value": 567.719613, "avg_hold_time": 0.308780456046748, "hold_time_today": 0.15330563657407406, "hold_time_7d": 0.5177172218364198, "hold_time_30d": 0.3048797549439872, "roe_24h": -4.4034301645954015, "roe_7d": 334.7399216164006, "roe_30d": 989.4197178274125, "roe_all": 1028.6109036110863}, {"rank": 22, "address": "0x826eba90429bff21646c5c56928ee397e424ac05", "total_trades": 122, "win_rate": 76.92307692307693, "sharpe_ratio": 7.0761191566033865, "profit_factor": 3.6953963177944025, "total_pnl": 98.833102, "total_realized_pnl": 98.833102, "total_unrealized_pnl": 0, "account_value": 382.886859, "perp_account_value": 382.886859, "spot_account_value": 0.0, "total_margin_used": 0.0, "mean_return": 1.493238501430668, "std_return": 3.0733828403975023, "min_return_7d": -1.6148557847155125, "trades_per_year": 212.11655296552524, "trading_days": 89.47910822916667, "bias": 28.688524590163937, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.0019784928266178264, "hold_time_today": 0.007845929580896686, "hold_time_7d": 0.0053494812334656085, "hold_time_30d": 0.005314633736559139, "roe_24h": 10.783751779863248, "roe_7d": 13.172447527378099, "roe_30d": 13.252702174584188, "roe_all": 82.886859}, {"rank": 23, "address": "0xa9d7045c13ec29ce7d84124da39f2e633309a164", "total_trades": 2799, "win_rate": 88.4871550903901, "sharpe_ratio": 6.904287507451463, "profit_factor": 13.167472302710397, "total_pnl": 70277.542143, "total_realized_pnl": 70277.542143, "total_unrealized_pnl": 0, "account_value": 75230.354181, "perp_account_value": 75230.345741, "spot_account_value": 0.00844, "total_margin_used": 0.0, "mean_return": 1.4593734542096095, "std_return": 6.165946152175548, "min_return_7d": 0.3939184519695922, "trades_per_year": 873.8542898233122, "trading_days": 438.9919514814815, "bias": 14.523043944265808, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 2.3770744205937953, "hold_time_today": 0, "hold_time_7d": 0.35652701326825015, "hold_time_30d": 0.3427672914261664, "roe_24h": 0.0, "roe_7d": 20.638818566786295, "roe_30d": 221.8348262437832, "roe_all": 7695.7149349020765}, {"rank": 24, "address": "0x4466d3a2417fd297611303542545e83fe5429546", "total_trades": 451, "win_rate": 72.05882352941177, "sharpe_ratio": 5.672050991739811, "profit_factor": 5.864690500720701, "total_pnl": 345.124436, "total_realized_pnl": 29.159546, "total_unrealized_pnl": 315.96489, "account_value": 1295.044855, "perp_account_value": 1295.044855, "spot_account_value": 0.0, "total_margin_used": 116.817, "mean_return": 0.35164463138004237, "std_return": 2.4127666282741345, "min_return_7d": -2.065254085827194, "trades_per_year": 1519.0139785003728, "trading_days": 49.01864041666666, "bias": 0.0, "long_positions": 0, "short_positions": 1, "total_positions": 1, "position_bias": "空头", "total_position_value": 584.085, "avg_hold_time": 0.0628867601263723, "hold_time_today": 0.06672843223905724, "hold_time_7d": 0.04778727070230608, "hold_time_30d": 0.04323975857459572, "roe_24h": 3.5691311284197993, "roe_7d": 11.204152058178426, "roe_30d": 30.799727015914108, "roe_all": 137.13564519879097}, {"rank": 25, "address": "0xc09b7082026491173c90579a3b120a844be471e7", "total_trades": 6607, "win_rate": 62.866085401296665, "sharpe_ratio": 5.110726457894088, "profit_factor": 1000.0, "total_pnl": 11748.033311, "total_realized_pnl": 11748.033311, "total_unrealized_pnl": 0, "account_value": 11611.82755086, "perp_account_value": 11511.82382, "spot_account_value": 100.00373086, "total_margin_used": 0.0, "mean_return": 0.33672356391220437, "std_return": 3.061870194143683, "min_return_7d": 1.2091166623744527, "trades_per_year": 2265.6418531440136, "trading_days": 720.6103637847223, "bias": 65.94520962615408, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.9838080592517922, "hold_time_today": 0.005124823196040868, "hold_time_7d": 0.013350998075998075, "hold_time_30d": 0.011812470012626263, "roe_24h": 6.05231497981613, "roe_7d": 15.595354252007148, "roe_30d": 21.067727150729567, "roe_all": 3027.369924030601}, {"rank": 26, "address": "0x9b15d52dbf7c97124bb7f5fdf0973c776f78d79c", "total_trades": 1818, "win_rate": 69.11045943304008, "sharpe_ratio": 4.096350908731056, "profit_factor": 3.365669866590273, "total_pnl": 3445.42362, "total_realized_pnl": 3445.42362, "total_unrealized_pnl": 0, "account_value": 10197.454973, "perp_account_value": 10197.454973, "spot_account_value": 0.0, "total_margin_used": 0.0, "mean_return": 0.1758353826692125, "std_return": 2.9654107588841603, "min_return_7d": -2.304500610876304, "trades_per_year": 4776.258504379099, "trading_days": 78.17730126157407, "bias": 69.08690869086908, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.00840611401122079, "hold_time_today": 0.0006664556030389364, "hold_time_7d": 0.0004945391287371709, "hold_time_30d": 0.0011000451898439318, "roe_24h": 1.7843998293693657, "roe_7d": 19.3973342169529, "roe_30d": 28.42837044792446, "roe_all": 261.5521246872661}, {"rank": 27, "address": "0x34f78cd823fea1284782641a11a56b9bdff2ce56", "total_trades": 279, "win_rate": 66.97247706422019, "sharpe_ratio": 3.2925178528117423, "profit_factor": 2.7092008568903467, "total_pnl": 1565.12992517, "total_realized_pnl": 1565.12992517, "total_unrealized_pnl": 0, "account_value": 6547.52162629, "perp_account_value": 2624.720303, "spot_account_value": 3922.8013232900003, "total_margin_used": 0.0, "mean_return": 2.7883395964010314, "std_return": 9.83203185812062, "min_return_7d": -6.129719694125957, "trades_per_year": 135.1511747609708, "trading_days": 294.37405979166664, "bias": 39.24731182795699, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.46280841653247445, "hold_time_today": 0.017097654320987653, "hold_time_7d": 0.6152577085963805, "hold_time_30d": 0.518553364124738, "roe_24h": 0.2686286860814692, "roe_7d": 13.705863433807247, "roe_30d": 22.19050662949944, "roe_all": 124.92116176299572}, {"rank": 28, "address": "0x0d8bf40b3a87036371a27e280d53174f437c4443", "total_trades": 111, "win_rate": 78.0, "sharpe_ratio": 3.190606711908589, "profit_factor": 2.471142782320202, "total_pnl": 2101.27326237, "total_realized_pnl": 2101.27326237, "total_unrealized_pnl": 0, "account_value": 36553.078058240004, "perp_account_value": 36553.070519, "spot_account_value": 0.00753924, "total_margin_used": 0.0, "mean_return": 0.13736732461093584, "std_return": 1.228740144620178, "min_return_7d": -2.311340788815621, "trades_per_year": 880.7265811535933, "trading_days": 20.72152741898148, "bias": 69.81981981981983, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.6500324142466329, "hold_time_today": 0.04008737702546296, "hold_time_7d": 0.9392426509773663, "hold_time_30d": 0.6500324142466329, "roe_24h": 2.739095849631727, "roe_7d": 1512882.7987122387, "roe_30d": 111.38128067729085, "roe_all": 111.38128067729085}, {"rank": 29, "address": "0xf61a6df7066dc9fb71612c3a4b67a595b7bdd622", "total_trades": 100, "win_rate": 66.10169491525424, "sharpe_ratio": 3.135917833245757, "profit_factor": 2.4636005270486487, "total_pnl": 21.87256, "total_realized_pnl": 21.87256, "total_unrealized_pnl": 0, "account_value": 519.277722, "perp_account_value": 519.277722, "spot_account_value": 0.0, "total_margin_used": 0.0, "mean_return": 0.02920626962391163, "std_return": 0.903339630716339, "min_return_7d": -1.471770621823088, "trades_per_year": 9409.497616834997, "trading_days": 2.2886450347222222, "bias": 31.0, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.00036179491991991994, "hold_time_today": 0.0009770728114478116, "hold_time_7d": 0.00036179491991991994, "hold_time_30d": 0.00036179491991991994, "roe_24h": -2.3371326213579766, "roe_7d": 194.47035885167466, "roe_30d": 194.47035885167466, "roe_all": 194.47035885167466}, {"rank": 30, "address": "0xb8934845c3b00d53744b7e20a08b915d61e767c3", "total_trades": 463, "win_rate": 81.28342245989305, "sharpe_ratio": 2.702841820139135, "profit_factor": 7.318744905464412, "total_pnl": 6368.53152, "total_realized_pnl": 6368.53152, "total_unrealized_pnl": 0, "account_value": 0.00209518, "perp_account_value": 0.0, "spot_account_value": 0.00209518, "total_margin_used": 0.0, "mean_return": 3.287888661915602, "std_return": 11.53488976780454, "min_return_7d": 0.14068672136128837, "trades_per_year": 90.23670950325413, "trading_days": 756.3994783912037, "bias": 44.9244060475162, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.7235089011226251, "hold_time_today": 0.003844355227623457, "hold_time_7d": 0.003844355227623457, "hold_time_30d": 1.2543134431961411, "roe_24h": 12261927.480916029, "roe_7d": 12261927.480916029, "roe_30d": 41462786.25954198, "roe_all": 9853.687015462054}, {"rank": 31, "address": "0xdb7cc8d3b4bfb4365f59f0f66cd8a84b74b29a5c", "total_trades": 520, "win_rate": 79.3296089385475, "sharpe_ratio": 2.687292015892008, "profit_factor": 45.46455157102448, "total_pnl": 55649.47863689, "total_realized_pnl": 55649.47863689, "total_unrealized_pnl": 0, "account_value": 13099.982404330001, "perp_account_value": 11074.0552, "spot_account_value": 2025.92720433, "total_margin_used": 0.0, "mean_return": 0.3373717171716793, "std_return": 4.5191821737340385, "min_return_7d": -0.9821835797954935, "trades_per_year": 1305.1472039841751, "trading_days": 100.1189747800926, "bias": 54.42307692307692, "long_positions": 0, "short_positions": 0, "total_positions": 0, "position_bias": "中性", "total_position_value": 0, "avg_hold_time": 0.14972775551581166, "hold_time_today": 0.5117582745894479, "hold_time_7d": 0.2795413287839201, "hold_time_30d": 0.1888818078006937, "roe_24h": 1.7478017433831765, "roe_7d": 62.224529178516605, "roe_30d": 282.98701357010015, "roe_all": 97732.26976683938}, {"rank": 32, "address": "0x2689ee9c62e838955110191b672059c700a412dc", "total_trades": 872, "win_rate": 67.84140969162996, "sharpe_ratio": 1.6576819919923547, "profit_factor": 1.5458629090528024, "total_pnl": 177.668089, "total_realized_pnl": 179.715719, "total_unrealized_pnl": -2.04763, "account_value": 61.301138, "perp_account_value": 61.301138, "spot_account_value": 0.0, "total_margin_used": 61.300824, "mean_return": 0.18773811114356984, "std_return": 4.762648437049954, "min_return_7d": -6.174316976039823, "trades_per_year": 1870.7717774592436, "trading_days": 88.57841560185186, "bias": 69.26605504587155, "long_positions": 1, "short_positions": 0, "total_positions": 1, "position_bias": "多头", "total_position_value": 188.350458, "avg_hold_time": 0.6428308329669288, "hold_time_today": 0.03549519444444445, "hold_time_7d": 0.1008319425154321, "hold_time_30d": 0.2263416152180406, "roe_24h": 51.87968565903104, "roe_7d": 320.14177872474704, "roe_30d": 300.14214615923413, "roe_all": -391.5286272775311}, {"rank": 33, "address": "0xbfb93dfdfcb6b0431983e62f31a298422c72ae26", "total_trades": 261, "win_rate": 80.67226890756302, "sharpe_ratio": 1.5143943525816996, "profit_factor": 2.0143973611201877, "total_pnl": 1235.58627581, "total_realized_pnl": 1359.95925281, "total_unrealized_pnl": -124.372977, "account_value": 4969.64891503, "perp_account_value": 4969.183347, "spot_account_value": 0.46556803, "total_margin_used": 1351.007916, "mean_return": 1.1655724445509386, "std_return": 7.319456071295326, "min_return_7d": -0.3507734442242641, "trades_per_year": 105.44340339799787, "trading_days": 411.9271438541667, "bias": 7.471264367816097, "long_positions": 0, "short_positions": 1, "total_positions": 1, "position_bias": "空头", "total_position_value": 4547.5512, "avg_hold_time": 10.628350645891567, "hold_time_today": 0.018444330632716048, "hold_time_7d": 0.11571886904761905, "hold_time_30d": 0.9373581099267873, "roe_24h": 0.5245297179517674, "roe_7d": 13.134140788151033, "roe_30d": 51.17500141508775, "roe_all": 187.25806645565262}, {"rank": 34, "address": "0x25cb49a7bd9baa4b42ac0b5f7445692b58ced661", "total_trades": 5804, "win_rate": 73.49759615384616, "sharpe_ratio": -0.6344726534012832, "profit_factor": 1.6675035084867245, "total_pnl": 41913.977907780005, "total_realized_pnl": 35111.05967778001, "total_unrealized_pnl": 6802.918229999999, "account_value": 87932.3205532, "perp_account_value": 87931.207929, "spot_account_value": 1.1126242000000002, "total_margin_used": 56800.822763, "mean_return": -2.205781660923156, "std_return": 98.80578229677104, "min_return_7d": -3.5243225817708654, "trades_per_year": 795.6762161215263, "trading_days": 763.3255684837962, "bias": 56.013094417643, "long_positions": 2, "short_positions": 0, "total_positions": 2, "position_bias": "多头", "total_position_value": 506801.27272, "avg_hold_time": 2.0549722820133134, "hold_time_today": 0.08151097542032164, "hold_time_7d": 0.5660519664985258, "hold_time_30d": 0.5420693639108287, "roe_24h": 4.940566333369891, "roe_7d": 37.31264257423173, "roe_30d": 102.68769035812049, "roe_all": 840.8491886909385}, {"rank": 35, "address": "0x513cf4896e8f37eb86841f7d33e81aa4704d95da", "total_trades": 253, "win_rate": 69.2982456140351, "sharpe_ratio": -0.8047776600655446, "profit_factor": 1000.0, "total_pnl": 5661.29161201, "total_realized_pnl": 5072.03187201, "total_unrealized_pnl": 589.25974, "account_value": 2377.1513769599997, "perp_account_value": 2281.987225, "spot_account_value": 95.16415196, "total_margin_used": 2236.194071, "mean_return": -12.343963861113853, "std_return": 117.66651783874691, "min_return_7d": 12.326432861956043, "trades_per_year": 56.57346335319779, "trading_days": 735.5038481597222, "bias": 50.98814229249012, "long_positions": 1, "short_positions": 0, "total_positions": 1, "position_bias": "多头", "total_position_value": 5491.59, "avg_hold_time": 30.332104519310978, "hold_time_today": 0, "hold_time_7d": 0.86832484375, "hold_time_30d": 0.86832484375, "roe_24h": 30.371747572868014, "roe_7d": 11567.160812033188, "roe_30d": 8223.563535369129, "roe_all": 823.7572894713733}, {"rank": 36, "address": "0xb877df08df30c41e41ecd6b21368678aa78b80ba", "total_trades": 9847, "win_rate": 55.41032783372616, "sharpe_ratio": -1.1601469755208669, "profit_factor": 1.9732497265778532, "total_pnl": -2938.1104573400003, "total_realized_pnl": -1808.6177673400002, "total_unrealized_pnl": -1129.49269, "account_value": 7801.26825788, "perp_account_value": 7570.64041, "spot_account_value": 230.62784788000002, "total_margin_used": 2354.564474, "mean_return": -2.623068066788947, "std_return": 119.10680807707934, "min_return_7d": -7.282883470602626, "trades_per_year": 2744.0396989432575, "trading_days": 620.7836572685185, "bias": 70.12795775363055, "long_positions": 5, "short_positions": 0, "total_positions": 5, "position_bias": "多头", "total_position_value": 25851.089592, "avg_hold_time": 1.8284078864909965, "hold_time_today": 0.006868770208700764, "hold_time_7d": 0.6724131293133864, "hold_time_30d": 0.40565610998607143, "roe_24h": 3.9377214282231785, "roe_7d": 55.22342893079328, "roe_30d": 94.41751900908515, "roe_all": 106856.5873710731}];
+
+        // 列定义
+        const columns = [
+            // 基础信息
+            { key: 'rank', label: '#', format: v => v, defaultVisible: true },
+            { key: 'address', label: '地址', format: v => v, defaultVisible: true, isAddress: true },
+            // 核心交易指标
+            { key: 'total_trades', label: '交易数', format: v => v.toLocaleString(), defaultVisible: true },
+            { key: 'win_rate', label: '胜率', format: v => v.toFixed(1) + '%', defaultVisible: true },
+            { key: 'sharpe_ratio', label: '夏普比率', format: v => v.toFixed(2), defaultVisible: true, colorByValue: true },
+            { key: 'profit_factor', label: '盈利因子', format: v => v >= 1000 ? '∞' : v.toFixed(2), defaultVisible: true, colorByValue: true, threshold: 1 },
+            // 盈亏指标
+            { key: 'total_pnl', label: '总PNL', format: v => formatCurrency(v), defaultVisible: true, colorByValue: true, isCurrency: true },
+            { key: 'total_realized_pnl', label: '已实现PNL', format: v => formatCurrency(v), defaultVisible: false, colorByValue: true, isCurrency: true },
+            { key: 'total_unrealized_pnl', label: '未实现PNL', format: v => formatCurrency(v), defaultVisible: false, colorByValue: true, isCurrency: true },
+            // 账户信息
+            { key: 'account_value', label: '账户价值', format: v => formatCurrency(v), defaultVisible: true, isCurrency: true },
+            { key: 'perp_account_value', label: 'Perp账户', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true },
+            { key: 'spot_account_value', label: 'Spot账户', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true },
+            { key: 'total_margin_used', label: '保证金使用', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true },
+            // 收益率指标
+            { key: 'mean_return', label: '平均收益率', format: v => v.toFixed(2) + '%', defaultVisible: true, colorByValue: true },
+            { key: 'std_return', label: '收益率标准差', format: v => v.toFixed(2) + '%', defaultVisible: false },
+            { key: 'min_return_7d', label: '7天最小收益率', format: v => v.toFixed(2) + '%', defaultVisible: false, colorByValue: true },
+            { key: 'trades_per_year', label: '年交易频率', format: v => v.toFixed(0), defaultVisible: false },
+            { key: 'trading_days', label: '交易天数', format: v => v.toFixed(1), defaultVisible: false },
+            // 方向偏好
+            { key: 'bias', label: '方向偏好%', format: v => v.toFixed(1) + '%', defaultVisible: false },
+            { key: 'position_bias', label: '仓位偏好', format: v => v, defaultVisible: false },
+            { key: 'long_positions', label: '多头持仓', format: v => v, defaultVisible: false },
+            { key: 'short_positions', label: '空头持仓', format: v => v, defaultVisible: false },
+            { key: 'total_positions', label: '当前持仓数', format: v => v, defaultVisible: false },
+            { key: 'total_position_value', label: '持仓总价值', format: v => formatCurrency(v), defaultVisible: false, isCurrency: true },
+            // 持仓时间
+            { key: 'avg_hold_time', label: '历史平均持仓时间', format: v => formatHoldTime(v), defaultVisible: true },
+            { key: 'hold_time_today', label: '今日平均持仓时间', format: v => formatHoldTime(v), defaultVisible: false },
+            { key: 'hold_time_7d', label: '7天平均持仓时间', format: v => formatHoldTime(v), defaultVisible: false },
+            { key: 'hold_time_30d', label: '30天平均持仓时间', format: v => formatHoldTime(v), defaultVisible: false },
+            // ROE 指标
+            { key: 'roe_24h', label: 'ROE(24h)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: true, colorByValue: true },
+            { key: 'roe_7d', label: 'ROE(7d)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: false, colorByValue: true },
+            { key: 'roe_30d', label: 'ROE(30d)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: false, colorByValue: true },
+            { key: 'roe_all', label: 'ROE(历史)', format: v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%', defaultVisible: false, colorByValue: true },
+        ];
+
+        // 可见列
+        let visibleColumns = columns.filter(c => c.defaultVisible).map(c => c.key);
+
+        // 当前排序
+        let currentSort = { key: 'rank', dir: 'asc' };
+
+        // 筛选条件
+        let filters = [];
+
+        // 获取可筛选的数值列（排除地址和文本列）
+        const filterableColumns = columns.filter(c =>
+            c.key !== 'address' && c.key !== 'position_bias' && c.key !== 'rank'
+        );
+
+        // 格式化函数
+        function formatCurrency(value) {
+            if (Math.abs(value) >= 1000000) {
+                return '$' + (value / 1000000).toFixed(2) + 'M';
+            } else if (Math.abs(value) >= 1000) {
+                return '$' + value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+            } else {
+                return '$' + value.toFixed(2);
+            }
+        }
+
+        function formatHoldTime(days) {
+            if (days === 0) return '0';
+            if (days >= 1) return days.toFixed(1) + '天';
+            if (days >= 1/24) return (days * 24).toFixed(1) + '时';
+            return (days * 24 * 60).toFixed(0) + '分';
+        }
+
+        // 渲染表头
+        function renderHeader() {
+            const header = document.getElementById('tableHeader');
+            header.innerHTML = '';
+
+            visibleColumns.forEach(key => {
+                const col = columns.find(c => c.key === key);
+                const th = document.createElement('th');
+                th.dataset.key = key;
+                th.innerHTML = `${col.label} <span class="sort-icon"></span>`;
+
+                if (currentSort.key === key) {
+                    th.classList.add(currentSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+
+                th.addEventListener('click', () => sortTable(key));
+                header.appendChild(th);
+            });
+        }
+
+        // 渲染表格数据
+        function renderTable(data) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+
+                visibleColumns.forEach(key => {
+                    const col = columns.find(c => c.key === key);
+                    const td = document.createElement('td');
+                    const value = row[key];
+
+                    // 格式化显示
+                    td.textContent = col.format(value);
+
+                    // 特殊样式
+                    if (col.isAddress) {
+                        td.classList.add('address');
+                    }
+
+                    if (key === 'rank') {
+                        td.classList.add('rank');
+                    }
+
+                    // 根据值着色
+                    if (col.colorByValue) {
+                        const threshold = col.threshold || 0;
+                        if (value > threshold) {
+                            td.classList.add('positive', 'highlight');
+                        } else if (value < threshold) {
+                            td.classList.add('negative');
+                        } else {
+                            td.classList.add('neutral');
+                        }
+                    }
+
+                    tr.appendChild(td);
+                });
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 排序表格
+        function sortTable(key) {
+            if (currentSort.key === key) {
+                currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.key = key;
+                currentSort.dir = 'desc';
+            }
+
+            renderHeader();
+            applyFiltersAndRender();
+        }
+
+        // 搜索词
+        let searchTerm = '';
+
+        // 应用所有筛选条件并返回数据
+        function getFilteredData() {
+            let data = [...tableData];
+
+            // 应用地址搜索
+            if (searchTerm) {
+                data = data.filter(row =>
+                    row.address.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+            }
+
+            // 应用数值筛选
+            filters.forEach(filter => {
+                data = data.filter(row => {
+                    const value = row[filter.column];
+                    switch (filter.operator) {
+                        case 'gt': return value > filter.value1;
+                        case 'gte': return value >= filter.value1;
+                        case 'lt': return value < filter.value1;
+                        case 'lte': return value <= filter.value1;
+                        case 'eq': return value === filter.value1;
+                        case 'between': return value >= filter.value1 && value <= filter.value2;
+                        default: return true;
+                    }
+                });
+            });
+
+            return data;
+        }
+
+        // 应用排序并渲染
+        function applyFiltersAndRender() {
+            let data = getFilteredData();
+
+            // 应用排序
+            data.sort((a, b) => {
+                let aVal = a[currentSort.key];
+                let bVal = b[currentSort.key];
+
+                if (typeof aVal === 'string') {
+                    return currentSort.dir === 'asc'
+                        ? aVal.localeCompare(bVal)
+                        : bVal.localeCompare(aVal);
+                }
+
+                return currentSort.dir === 'asc' ? aVal - bVal : bVal - aVal;
+            });
+
+            renderTable(data);
+            updateFilterResultCount(data.length);
+            renderActiveFilters();
+        }
+
+        // 更新筛选结果计数
+        function updateFilterResultCount(count) {
+            const el = document.getElementById('filterResultCount');
+            if (filters.length > 0 || searchTerm) {
+                el.textContent = `显示 ${count} / ${tableData.length} 条记录`;
+            } else {
+                el.textContent = '';
+            }
+        }
+
+        // 渲染活动筛选标签
+        function renderActiveFilters() {
+            const container = document.getElementById('activeFilters');
+            container.innerHTML = '';
+
+            filters.forEach((filter, index) => {
+                const col = columns.find(c => c.key === filter.column);
+                const badge = document.createElement('span');
+                badge.className = 'filter-badge';
+
+                let text = col.label + ' ';
+                switch (filter.operator) {
+                    case 'gt': text += '> ' + filter.value1; break;
+                    case 'gte': text += '≥ ' + filter.value1; break;
+                    case 'lt': text += '< ' + filter.value1; break;
+                    case 'lte': text += '≤ ' + filter.value1; break;
+                    case 'eq': text += '= ' + filter.value1; break;
+                    case 'between': text += filter.value1 + ' ~ ' + filter.value2; break;
+                }
+
+                badge.innerHTML = text + ' <span class="filter-badge-remove" data-index="' + index + '">×</span>';
+                container.appendChild(badge);
+            });
+
+            // 绑定删除事件
+            container.querySelectorAll('.filter-badge-remove').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(e.target.dataset.index);
+                    filters.splice(idx, 1);
+                    renderFilterList();
+                    applyFiltersAndRender();
+                });
+            });
+        }
+
+        // 渲染筛选条件列表
+        function renderFilterList() {
+            const list = document.getElementById('filterList');
+            list.innerHTML = '';
+
+            filters.forEach((filter, index) => {
+                const row = document.createElement('div');
+                row.className = 'filter-row';
+
+                // 列选择
+                const colSelect = document.createElement('select');
+                colSelect.className = 'filter-select';
+                filterableColumns.forEach(col => {
+                    const opt = document.createElement('option');
+                    opt.value = col.key;
+                    opt.textContent = col.label;
+                    opt.selected = col.key === filter.column;
+                    colSelect.appendChild(opt);
+                });
+
+                // 操作符选择
+                const opSelect = document.createElement('select');
+                opSelect.className = 'filter-select';
+                const operators = [
+                    { value: 'gt', label: '大于 (>)' },
+                    { value: 'gte', label: '大于等于 (≥)' },
+                    { value: 'lt', label: '小于 (<)' },
+                    { value: 'lte', label: '小于等于 (≤)' },
+                    { value: 'eq', label: '等于 (=)' },
+                    { value: 'between', label: '区间' }
+                ];
+                operators.forEach(op => {
+                    const opt = document.createElement('option');
+                    opt.value = op.value;
+                    opt.textContent = op.label;
+                    opt.selected = op.value === filter.operator;
+                    opSelect.appendChild(opt);
+                });
+
+                // 数值输入1
+                const input1 = document.createElement('input');
+                input1.type = 'number';
+                input1.step = 'any';
+                input1.className = 'filter-input';
+                input1.placeholder = '数值';
+                input1.value = filter.value1 || '';
+
+                // 数值输入2（区间用）
+                const input2 = document.createElement('input');
+                input2.type = 'number';
+                input2.step = 'any';
+                input2.className = 'filter-input';
+                input2.placeholder = '最大值';
+                input2.value = filter.value2 || '';
+                input2.style.display = filter.operator === 'between' ? 'block' : 'none';
+
+                // 删除按钮
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'filter-btn filter-btn-remove';
+                removeBtn.textContent = '×';
+
+                // 事件绑定
+                colSelect.addEventListener('change', () => {
+                    filters[index].column = colSelect.value;
+                    applyFiltersAndRender();
+                });
+
+                opSelect.addEventListener('change', () => {
+                    filters[index].operator = opSelect.value;
+                    input2.style.display = opSelect.value === 'between' ? 'block' : 'none';
+                    applyFiltersAndRender();
+                });
+
+                input1.addEventListener('input', () => {
+                    filters[index].value1 = parseFloat(input1.value) || 0;
+                    applyFiltersAndRender();
+                });
+
+                input2.addEventListener('input', () => {
+                    filters[index].value2 = parseFloat(input2.value) || 0;
+                    applyFiltersAndRender();
+                });
+
+                removeBtn.addEventListener('click', () => {
+                    filters.splice(index, 1);
+                    renderFilterList();
+                    applyFiltersAndRender();
+                });
+
+                row.appendChild(colSelect);
+                row.appendChild(opSelect);
+                row.appendChild(input1);
+                row.appendChild(input2);
+                row.appendChild(removeBtn);
+                list.appendChild(row);
+            });
+        }
+
+        // 添加筛选条件
+        function addFilter() {
+            filters.push({
+                column: filterableColumns[0].key,
+                operator: 'gt',
+                value1: 0,
+                value2: 0
+            });
+            renderFilterList();
+        }
+
+        // 清除所有筛选
+        function clearFilters() {
+            filters = [];
+            renderFilterList();
+            applyFiltersAndRender();
+        }
+
+        // 列选择器
+        function renderColumnMenu() {
+            const menu = document.getElementById('columnMenu');
+            menu.innerHTML = '';
+
+            // 添加全选/取消全选按钮
+            const btnContainer = document.createElement('div');
+            btnContainer.className = 'column-menu-buttons';
+
+            const selectAllBtn = document.createElement('button');
+            selectAllBtn.className = 'column-menu-btn';
+            selectAllBtn.textContent = '全选';
+            selectAllBtn.addEventListener('click', () => {
+                visibleColumns = columns.map(c => c.key);
+                renderHeader();
+                sortTable(currentSort.key);
+                renderColumnMenu();
+            });
+
+            const deselectAllBtn = document.createElement('button');
+            deselectAllBtn.className = 'column-menu-btn';
+            deselectAllBtn.textContent = '取消全选';
+            deselectAllBtn.addEventListener('click', () => {
+                // 保留基础列：排名和地址
+                visibleColumns = ['rank', 'address'];
+                renderHeader();
+                sortTable(currentSort.key);
+                renderColumnMenu();
+            });
+
+            btnContainer.appendChild(selectAllBtn);
+            btnContainer.appendChild(deselectAllBtn);
+            menu.appendChild(btnContainer);
+
+            // 列复选框
+            columns.forEach(col => {
+                const label = document.createElement('label');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = visibleColumns.includes(col.key);
+                checkbox.addEventListener('change', () => {
+                    if (checkbox.checked) {
+                        visibleColumns.push(col.key);
+                    } else {
+                        visibleColumns = visibleColumns.filter(k => k !== col.key);
+                    }
+                    // 保持原始顺序
+                    visibleColumns = columns.filter(c => visibleColumns.includes(c.key)).map(c => c.key);
+                    renderHeader();
+                    sortTable(currentSort.key);
+                });
+
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode(' ' + col.label));
+                menu.appendChild(label);
+            });
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            renderHeader();
+            renderTable(tableData);
+            renderColumnMenu();
+            renderFilterList();
+
+            // 搜索事件
+            document.getElementById('searchInput').addEventListener('input', e => {
+                searchTerm = e.target.value;
+                applyFiltersAndRender();
+            });
+
+            // 筛选器按钮事件
+            document.getElementById('addFilterBtn').addEventListener('click', addFilter);
+            document.getElementById('clearFiltersBtn').addEventListener('click', clearFilters);
+
+            // 列选择器切换
+            const toggle = document.getElementById('columnToggle');
+            const menu = document.getElementById('columnMenu');
+
+            toggle.addEventListener('click', () => {
+                menu.classList.toggle('show');
+            });
+
+            document.addEventListener('click', e => {
+                if (!toggle.contains(e.target) && !menu.contains(e.target)) {
+                    menu.classList.remove('show');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
