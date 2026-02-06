@@ -727,6 +727,7 @@ class ApexCalculator:
         week_hold_times = []
         month_hold_times = []
         all_hold_times = []
+        under_5min_count = 0
 
         for open_time, close_time, _ in completed_positions:
             open_dt = datetime.fromtimestamp(open_time / 1000)
@@ -734,6 +735,10 @@ class ApexCalculator:
 
             hold_time_days = (close_dt - open_dt).total_seconds() / 86400
             all_hold_times.append(hold_time_days)
+
+            # 统计持仓时间<5分钟的交易
+            if hold_time_days < 5 / 1440:  # 5分钟 = 5/1440天
+                under_5min_count += 1
 
             # 按时间段分类
             if close_dt >= today_start:
@@ -753,11 +758,15 @@ class ApexCalculator:
             logger.warning(f"   未平仓多头: {sum(len(q) for q in long_open_positions.values())} 笔")
             logger.warning(f"   未平仓空头: {sum(len(q) for q in short_open_positions.values())} 笔")
 
+        total_completed = len(all_hold_times)
+        under_5min_ratio = (under_5min_count / total_completed * 100) if total_completed > 0 else 0
+
         return {
             "todayCount": sum(today_hold_times) / len(today_hold_times) if today_hold_times else 0,
             "last7DaysAverage": sum(week_hold_times) / len(week_hold_times) if week_hold_times else 0,
             "last30DaysAverage": sum(month_hold_times) / len(month_hold_times) if month_hold_times else 0,
-            "allTimeAverage": sum(all_hold_times) / len(all_hold_times) if all_hold_times else 0
+            "allTimeAverage": sum(all_hold_times) / len(all_hold_times) if all_hold_times else 0,
+            "under5minRatio": under_5min_ratio
         }
     
     def analyze_user(self, user_address: str, force_refresh: bool = False) -> Dict[str, Any]:

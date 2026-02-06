@@ -78,6 +78,7 @@ def filter_results_by_criteria(results: List[BatchAddressResult]) -> List[BatchA
         # 持仓时间
         hold_time_today = hold_time_stats.get('todayCount', 0)
         hold_time_7d = hold_time_stats.get('last7DaysAverage', 0)
+        under_5min_ratio = hold_time_stats.get('under5minRatio', 0)
 
         # 7天最小收益率（原始数据是小数，需要转换为百分比）
         return_metrics = raw.get('return_metrics_on_trades', {})
@@ -115,6 +116,8 @@ def filter_results_by_criteria(results: List[BatchAddressResult]) -> List[BatchA
             failed_conditions.append(f"平均每笔收益率={mean_return:.2f}% (需要>2%)")
         if not (profit_factor > 2.5):
             failed_conditions.append(f"盈利因子={profit_factor:.2f} (需要>1.5)")
+        if not (under_5min_ratio <= 40):
+            failed_conditions.append(f"持仓<5分钟占比={under_5min_ratio:.1f}% (需要<=40%)")
 
         if not failed_conditions:
             filtered.append(result)
