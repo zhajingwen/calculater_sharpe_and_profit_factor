@@ -29,3 +29,6 @@ test-*.sh
 .DS_Store
 .AppleDouble
 .LSOverride
+
+trading_report_*.html
+trading_report.html
