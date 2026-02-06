@@ -232,6 +232,8 @@ def load_addresses_from_file(filepath: str) -> List[str]:
                 if line and not line.startswith('#'):
                     addr = line.split(',')[0].strip().strip('"').strip("'")
                     if addr.startswith('0x') and len(addr) == 42:
+                        if addr in addresses:
+                            continue
                         addresses.append(addr)
     except FileNotFoundError:
         print(f"✗ 文件不存在: {filepath}")
