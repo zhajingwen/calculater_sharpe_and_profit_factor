@@ -66,6 +66,8 @@ def filter_results_by_criteria(results: List[BatchAddressResult]) -> List[BatchA
         if not result.success or not result.analysis:
             continue
 
+        addr_short = f"{result.address[:6]}...{result.address[-4:]}"
+
         # 提取筛选所需的指标
         total_trades = result.total_trades or 0
 
@@ -93,17 +95,33 @@ def filter_results_by_criteria(results: List[BatchAddressResult]) -> List[BatchA
         # 盈利因子
         profit_factor = result.profit_factor
 
-        # 应用筛选条件
-        if (total_trades > 10 and
-            min_return_7d > -8 and
-            hold_time_7d < 1 and
-            roe_24h > -10 and
-            roe_7d > 10 and
-            profit_factor > 1.5 and
-            hold_time_today < 0.083 and
-            hold_time_7d < 0.083 and
-            mean_return > 2):
+        # 逐条检查筛选条件，记录未通过的条件
+        failed_conditions = []
+        if not (total_trades > 10):
+            failed_conditions.append(f"总交易数={total_trades} (需要>10)")
+        if not (min_return_7d > -8):
+            failed_conditions.append(f"7天最小收益率={min_return_7d:.2f}% (需要>-8%)")
+        if not (hold_time_7d < 1):
+            failed_conditions.append(f"7天平均持仓时间={hold_time_7d:.4f}天 (需要<1天)")
+        if not (hold_time_today < 0.083):
+            failed_conditions.append(f"今日平均持仓时间={hold_time_today:.4f}天/{hold_time_today*24:.2f}h (需要<0.083天/2h)")
+        if not (hold_time_7d < 0.083):
+            failed_conditions.append(f"7天平均持仓时间={hold_time_7d:.4f}天/{hold_time_7d*24:.2f}h (需要<0.083天/2h)")
+        if not (roe_24h > -10):
+            failed_conditions.append(f"24h ROE={roe_24h:.2f}% (需要>-10%)")
+        if not (roe_7d > 10):
+            failed_conditions.append(f"7d ROE={roe_7d:.2f}% (需要>10%)")
+        if not (mean_return > 2):
+            failed_conditions.append(f"平均每笔收益率={mean_return:.2f}% (需要>2%)")
+        if not (profit_factor > 1.5):
+            failed_conditions.append(f"盈利因子={profit_factor:.2f} (需要>1.5)")
+
+        if not failed_conditions:
             filtered.append(result)
+        else:
+            print(f"   ⛔ {addr_short} 未通过筛选 ({len(failed_conditions)}项不达标):")
+            for cond in failed_conditions:
+                print(f"      ✗ {cond}")
 
     return filtered
 
@@ -201,8 +219,7 @@ def analyze_batch_addresses(addresses: List[str], force_refresh: bool = False) -
 
     # 生成 HTML 报告
     print()
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    html_filename = f"trading_report_{timestamp}.html"
+    html_filename = "trading_report.html"
 
     html_result = generate_html_report_from_batch_results(
         filtered_results,
