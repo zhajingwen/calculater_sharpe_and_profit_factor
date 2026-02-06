@@ -113,7 +113,7 @@ def filter_results_by_criteria(results: List[BatchAddressResult]) -> List[BatchA
             failed_conditions.append(f"7d ROE={roe_7d:.2f}% (需要>10%)")
         if not (mean_return > 2):
             failed_conditions.append(f"平均每笔收益率={mean_return:.2f}% (需要>2%)")
-        if not (profit_factor > 1.5):
+        if not (profit_factor > 2.5):
             failed_conditions.append(f"盈利因子={profit_factor:.2f} (需要>1.5)")
 
         if not failed_conditions:
