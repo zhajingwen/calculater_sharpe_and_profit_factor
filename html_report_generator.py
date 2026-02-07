@@ -172,8 +172,10 @@ def format_hold_time(days: float) -> str:
         return f"{days:.1f}天"
     elif days >= 1/24:
         return f"{days * 24:.1f}时"
+    elif days >= 1/1440:
+        return f"{days * 24 * 60:.1f}分"
     else:
-        return f"{days * 24 * 60:.0f}分"
+        return f"{days * 86400:.1f}秒"
 
 
 def format_profit_factor(pf: float) -> str:
@@ -876,7 +878,8 @@ def generate_html_report(
             if (days === 0) return '0';
             if (days >= 1) return days.toFixed(1) + '天';
             if (days >= 1/24) return (days * 24).toFixed(1) + '时';
-            return (days * 24 * 60).toFixed(0) + '分';
+            if (days >= 1/1440) return (days * 24 * 60).toFixed(1) + '分';
+            return (days * 86400).toFixed(1) + '秒';
         }}
 
         // 渲染表头

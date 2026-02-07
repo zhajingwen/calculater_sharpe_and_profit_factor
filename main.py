@@ -52,6 +52,7 @@ def filter_results_by_criteria(results: List[BatchAddressResult]) -> List[BatchA
     - 7天平均持仓时间 < 1天
     - ROE(24h) > -10%
     - ROE(7d) > 10%
+    - 7天平均持仓时间 > 0
 
     Args:
         results: BatchAddressResult 列表
@@ -118,6 +119,8 @@ def filter_results_by_criteria(results: List[BatchAddressResult]) -> List[BatchA
             failed_conditions.append(f"盈利因子={profit_factor:.2f} (需要>1.5)")
         if not (under_5min_ratio <= 40):
             failed_conditions.append(f"持仓<5分钟占比={under_5min_ratio:.1f}% (需要<=40%)")
+        if not (hold_time_7d > 0):
+            failed_conditions.append(f"7天平均持仓时间={hold_time_7d:.4f}天 (需要>0)")
 
         if not failed_conditions:
             filtered.append(result)
